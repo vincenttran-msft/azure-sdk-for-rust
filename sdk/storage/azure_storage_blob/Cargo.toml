@@ -11,6 +11,7 @@ rust-version.workspace = true
 
 [dependencies]
 azure_storage_common.workspace = true
+async-trait.workspace = true
 async-std = { workspace = true }
 azure_core = { workspace = true }
 serde = { workspace = true }
@@ -18,7 +19,7 @@ serde_json = { workspace = true }
 time = { workspace = true }
 typespec_client_core = { workspace = true, features = ["reqwest"] }
 typespec_derive = { workspace = true }
-blob_storage = { path = "../blob_storage" }
+blob_storage = { path = "blob_storage" }
 uuid = { workspace = true }
 
 [dev-dependencies]

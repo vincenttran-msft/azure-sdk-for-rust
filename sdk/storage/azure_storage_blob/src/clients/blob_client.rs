@@ -1,60 +1,67 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-use azure_core::{Context, Method, Request, Response, Result, Url};
+use crate::policies::storage_headers_policy::StorageHeadersPolicy;
+use azure_core::{
+    AsClientOptions, BearerTokenCredentialPolicy, Context, Method, Request, Response, Result, Url,
+};
 use blob_storage::blob_blob::BlobBlobDownloadOptions;
 use blob_storage::blob_client::BlobClientOptions;
 use blob_storage::BlobClient as GeneratedBlobClient;
 use std::sync::Arc;
 use uuid::Uuid;
 
-// Later this will be auto-populated with current version, otherwise could take user input as well
-// const CURRENT_SVC_VERSION: String = String::from("2024-08-04");
-
 pub struct BlobClient {
-    account_name: String,
+    endpoint: String,
     container_name: String,
     blob_name: String,
     client: GeneratedBlobClient,
 }
 
 impl BlobClient {
+    const VERSION_ID: &'static str = ("2024-08-04");
+
     pub fn new(
-        account_name: String,
+        endpoint: String,
         container_name: String,
         blob_name: String,
         options: Option<BlobClientOptions>,
     ) -> Result<Self> {
-        // Build Blob URL from input
-        let endpoint = "https://".to_owned() + &account_name + ".blob.core.windows.net/";
         let options = options.unwrap_or_default();
-        let client = GeneratedBlobClient::with_no_credential(endpoint, Some(options))?;
+
+        // Modify the policies in BlobClientOptions to have our new StorageHeadersPolicy
+        // let mut client_options = options.client_options;
+        // let per_call_policies = client_options.per_call_policies();
+        // client_options.set_per_call_policies(per_call_policies);
+
+        // let options = BlobClientOptions::default();
+        // let mut client_options = options.client_options;
+        // client_options.set_per_call_policies(client_options.per_call_policies());
+
+        let client = GeneratedBlobClient::with_no_credential(endpoint.clone(), Some(options))?;
 
         Ok(Self {
-            account_name: account_name.clone(),
+            endpoint: endpoint.clone(),
             container_name: container_name.clone(),
             blob_name: blob_name.clone(),
             client: client,
         })
     }
 
-    // fn build_url(account_name: &str) -> String {
-    //     "https://".to_owned() + account_name + ".blob.core.windows.net/"
-    // }
-
     pub async fn download_blob(
         &self,
-        options: Option<BlobBlobDownloadOptions<'_>>, // Curious if this is the right move, or if we can do a simple wrapper with an easy Into convert to the generated version
+        options: Option<BlobBlobDownloadOptions<'_>>,
     ) -> Result<Response<Vec<u8>>> {
-        //TODO: Inject version through a pipeline policy
-        let version = Uuid::new_v4().to_string();
+        // Let's hardcode this for now, and we will set a different value in the pipeline policy.
+        // Pipeline policy value should show up since it runs last
+        let version = String::from("80bc3c5e-3bb7-95f6-6c57-8ceb2c9155");
         self.client
             .get_blob_blob_client()
             .download(
                 self.container_name.clone(),
                 self.blob_name.clone(),
                 version,
-                String::from("2024-08-04"),
+                String::from(Self::VERSION_ID),
                 Some(BlobBlobDownloadOptions::default()),
             )
             .await
@@ -81,7 +88,7 @@ mod tests {
     #[tokio::test]
     async fn test_download_blob() {
         let blob_client = BlobClient::new(
-            String::from("vincenttranpublicac"),
+            String::from("https://vincenttranpublicac.blob.core.windows.net/"),
             String::from("public"),
             String::from("hello.txt"),
             Some(BlobClientOptions::default()),

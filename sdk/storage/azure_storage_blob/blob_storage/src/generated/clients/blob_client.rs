@@ -20,7 +20,8 @@ pub struct BlobClient {
 
 #[derive(Clone, Debug)]
 pub struct BlobClientOptions {
-    client_options: ClientOptions,
+    // NYI GENERATED CODE SUPPORT: client_options pub(crate)
+    pub client_options: ClientOptions,
 }
 
 impl BlobClient {
