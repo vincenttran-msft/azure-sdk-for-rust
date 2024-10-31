@@ -32,13 +32,15 @@ impl BlobClient {
         // Modify the policies in BlobClientOptions to have our new StorageHeadersPolicy
         // let mut client_options = options.client_options;
         // let per_call_policies = client_options.per_call_policies();
-        // client_options.set_per_call_policies(per_call_policies);
+        // client_options.set_per_call_policies(*per_call_policies);
 
-        // let options = BlobClientOptions::default();
-        // let mut client_options = options.client_options;
-        // client_options.set_per_call_policies(client_options.per_call_policies());
+        let options = BlobClientOptions::default();
+        let mut client_options = options.client_options.clone();
+        let per_call_policies = client_options.per_call_policies().clone();
+        client_options.set_per_call_policies(per_call_policies);
 
-        let client = GeneratedBlobClient::with_no_credential(endpoint.clone(), Some(options))?;
+        let client =
+            GeneratedBlobClient::with_no_credential(endpoint.clone(), Some(options.clone()))?;
 
         Ok(Self {
             endpoint: endpoint.clone(),
