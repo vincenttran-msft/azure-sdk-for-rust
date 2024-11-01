@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 use crate::policies::storage_headers_policy::StorageHeadersPolicy;
+use azure_core::headers::HeaderName;
 use azure_core::{
     AsClientOptions, BearerTokenCredentialPolicy, Context, Method, Request, Response, Result, Url,
 };
@@ -27,17 +28,15 @@ impl BlobClient {
         blob_name: String,
         options: Option<BlobClientOptions>,
     ) -> Result<Self> {
-        let options = options.unwrap_or_default();
+        let mut options = BlobClientOptions::default();
 
         // Modify the policies in BlobClientOptions to have our new StorageHeadersPolicy
-        // let mut client_options = options.client_options;
-        // let per_call_policies = client_options.per_call_policies();
-        // client_options.set_per_call_policies(*per_call_policies);
-
-        let options = BlobClientOptions::default();
         let mut client_options = options.client_options.clone();
-        let per_call_policies = client_options.per_call_policies().clone();
+        let storage_headers_policy = Arc::new(StorageHeadersPolicy::new());
+        let mut per_call_policies = client_options.per_call_policies().clone();
+        per_call_policies.push(storage_headers_policy);
         client_options.set_per_call_policies(per_call_policies);
+        options.client_options = client_options;
 
         let client =
             GeneratedBlobClient::with_no_credential(endpoint.clone(), Some(options.clone()))?;
