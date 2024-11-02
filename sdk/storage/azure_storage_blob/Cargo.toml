@@ -14,6 +14,7 @@ azure_storage_common.workspace = true
 async-trait.workspace = true
 async-std = { workspace = true }
 azure_core = { workspace = true }
+azure_identity = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 time = { workspace = true }

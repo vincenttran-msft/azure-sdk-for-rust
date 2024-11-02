@@ -24,6 +24,7 @@ impl Policy for StorageHeadersPolicy {
         request: &mut Request,
         next: &[Arc<dyn Policy>],
     ) -> PolicyResult {
+        // TODO: Check if the header is already set (that means cx set), so don't set if so
         let request_id = Uuid::new_v4().to_string();
         request.insert_header("x-ms-client-request-id", request_id);
 
