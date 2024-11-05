@@ -9,7 +9,7 @@ use azure_core::{
     Result, Url,
 };
 use azure_identity::DefaultAzureCredentialBuilder;
-use blob_storage::blob_blob::BlobBlobDownloadOptions;
+use blob_storage::blob_blob::{BlobBlobDownloadOptions, BlobBlobGetPropertiesOptions};
 use blob_storage::blob_client::BlobClientOptions;
 use blob_storage::BlobClient as GeneratedBlobClient;
 use std::sync::Arc;
@@ -86,6 +86,26 @@ impl BlobClient {
             .await
     }
 
+    pub async fn get_blob_properties(
+        &self,
+        options: Option<BlobBlobGetPropertiesOptions<'_>>,
+    ) -> Result<Response<()>> {
+        // This hard-coded value still works, even though this is technically a bug for version_id
+        let version = String::from("80bc3c5e-3bb7-95f6-6c57-8ceb2c9155");
+        self.client
+            .get_blob_blob_client()
+            .get_properties(
+                self.container_name.clone(),
+                self.blob_name.clone(),
+                version,                        //blob version
+                String::from(Self::VERSION_ID), //svc version
+                Some(BlobBlobGetPropertiesOptions::default()),
+            )
+            .await
+    }
+
+    // pub fn get_container_client(&self) ->
+
     // pub async fn get_blob_properties(&self) -> Result<Response> {
     //     // Build the get properties request itself
     //     let mut request = Request::new(self.url.to_owned(), Method::Head); // This is technically cloning
@@ -116,6 +136,27 @@ mod tests {
         .unwrap();
         let response = blob_client
             .download_blob(Some(BlobBlobDownloadOptions::default()))
+            .await
+            .unwrap();
+        print!("{:?}", response);
+        print!(
+            "\n{:?}",
+            response.into_body().collect_string().await.unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_get_blob_properties() {
+        let blob_client = BlobClient::new(
+            String::from("https://vincenttranpublicac.blob.core.windows.net/"),
+            String::from("public"),
+            String::from("hello.txt"),
+            None,
+            Some(BlobClientOptions::default()),
+        )
+        .unwrap();
+        let response = blob_client
+            .get_blob_properties(Some(BlobBlobGetPropertiesOptions::default()))
             .await
             .unwrap();
         print!("{:?}", response);
