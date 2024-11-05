@@ -316,12 +316,20 @@ impl BlobContainer {
         let mut ctx = options.method_options.context();
         let mut url = self.endpoint.clone();
         let mut path = String::from("/{containerName}?restype=container");
+        // print!("\npath before: {}\n", path.clone());
         path = path.replace("{containerName}", &container_name.into());
+        // print!("\npath after: {}\n", path.clone());
         url.set_path(&path);
         if let Some(timeout) = options.timeout {
             url.query_pairs_mut()
                 .append_pair("timeout", &timeout.to_string());
         }
+        // print!("\nurl after using set_path: {}\n", url.clone());
+        // let injected_url = Url::parse(
+        //     "https://vincenttranstock.blob.core.windows.net/acontainer108f32e8?restype=container",
+        // )
+        // .expect("URL parsing failed.");
+        // let mut request = Request::new(injected_url, Method::Get);
         let mut request = Request::new(url, Method::Get);
         request.insert_header("accept", "application/json");
         if let Some(request_id) = options.request_id {
@@ -331,6 +339,7 @@ impl BlobContainer {
             request.insert_header("x-ms-lease-id", lease_id);
         }
         request.insert_header("x-ms-version", version.into());
+        // print!("\n***{:?}***\n", request.clone());
         self.pipeline.send(&mut ctx, &mut request).await
     }
 
