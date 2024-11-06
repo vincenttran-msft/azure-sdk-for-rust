@@ -30,7 +30,8 @@ impl BlobClient {
         options: Option<BlobClientOptions>,
     ) -> Result<Self> {
         let mut endpoint = Url::parse(endpoint.as_ref())?;
-        endpoint.query_pairs_mut().clear();
+        // NYI GENERATED CODE SUPPORTED: Remove call to query_pairs_mut().clear()
+        // endpoint.query_pairs_mut().clear();
         let options = options.unwrap_or_default();
         Ok(Self {
             endpoint,

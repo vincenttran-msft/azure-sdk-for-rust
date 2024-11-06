@@ -295,6 +295,14 @@ impl BlobContainer {
         let mut path = String::from("/{containerName}?restype=account&comp=properties");
         path = path.replace("{containerName}", &container_name.into());
         url.set_path(&path);
+
+        // Generated Code Issue
+        // Issue: Some characters, '?' are being %-encoded when they shouldn't be. This is due to the use of set_path()
+        // [Proposed Change Start]
+        // Before URL is sent to request, replace "%3F" -> "?"
+        let url = Url::parse(&url.as_str().replace("%3F", "?"))?;
+        // [Proposed Change End]
+
         let mut request = Request::new(url, Method::Get);
         request.insert_header("accept", "application/json");
         if let Some(request_id) = options.request_id {
@@ -314,22 +322,27 @@ impl BlobContainer {
     ) -> Result<Response<()>> {
         let options = options.unwrap_or_default();
         let mut ctx = options.method_options.context();
+        println!("\nWhat is endpoint: {}\n", self.endpoint.as_str());
         let mut url = self.endpoint.clone();
+        println!("\nStep 1: {}\n", url.as_str());
         let mut path = String::from("/{containerName}?restype=container");
-        // print!("\npath before: {}\n", path.clone());
         path = path.replace("{containerName}", &container_name.into());
-        // print!("\npath after: {}\n", path.clone());
+
         url.set_path(&path);
+        println!("\nStep 2: {}\n", url.as_str());
+
         if let Some(timeout) = options.timeout {
             url.query_pairs_mut()
                 .append_pair("timeout", &timeout.to_string());
         }
-        // print!("\nurl after using set_path: {}\n", url.clone());
-        // let injected_url = Url::parse(
-        //     "https://vincenttranstock.blob.core.windows.net/acontainer108f32e8?restype=container",
-        // )
-        // .expect("URL parsing failed.");
-        // let mut request = Request::new(injected_url, Method::Get);
+
+        // Generated Code Issue
+        // Issue: Some characters, '?' are being %-encoded when they shouldn't be. This is due to the use of set_path()
+        // [Proposed Change Start]
+        // Before URL is sent to request, replace "%3F" -> "?"
+        let url = Url::parse(&url.as_str().replace("%3F", "?"))?;
+        // [Proposed Change End]
+
         let mut request = Request::new(url, Method::Get);
         request.insert_header("accept", "application/json");
         if let Some(request_id) = options.request_id {
@@ -339,7 +352,6 @@ impl BlobContainer {
             request.insert_header("x-ms-lease-id", lease_id);
         }
         request.insert_header("x-ms-version", version.into());
-        // print!("\n***{:?}***\n", request.clone());
         self.pipeline.send(&mut ctx, &mut request).await
     }
 
