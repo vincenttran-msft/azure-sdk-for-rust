@@ -81,7 +81,7 @@ impl BlobClient {
                 self.blob_name.clone(),
                 version,                        //blob version
                 String::from(Self::VERSION_ID), //svc version
-                Some(BlobBlobDownloadOptions::default()),
+                options,
             )
             .await
     }
@@ -136,6 +136,34 @@ mod tests {
         .unwrap();
         let response = blob_client
             .download_blob(Some(BlobBlobDownloadOptions::default()))
+            .await
+            .unwrap();
+        print!("{:?}", response);
+        print!(
+            "\n{:?}",
+            response.into_body().collect_string().await.unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_download_blob_if_tags_match() {
+        let credential = DefaultAzureCredentialBuilder::default().build().unwrap();
+        let blob_client = BlobClient::new(
+            String::from("https://vincenttranstock.blob.core.windows.net/"),
+            String::from("options-bag-testing"),
+            String::from("i_have_tags.txt"),
+            Some(credential),
+            Some(BlobClientOptions::default()),
+        )
+        .unwrap();
+
+        // Build an BlobBlobDownloadOptions that contains if_tags_match with the matching condition to  {tagged: yes}
+        // These are expected as: "<key>"='<value'. but need to be unicode encoded
+        let if_tags = String::from("\u{0022}tagged\u{0022}=\u{0027}yes\u{0027}");
+        let download_options_builder = BlobBlobDownloadOptions::builder().with_if_tags(if_tags);
+        let mut download_options = download_options_builder.build();
+        let response = blob_client
+            .download_blob(Some(download_options))
             .await
             .unwrap();
         print!("{:?}", response);
