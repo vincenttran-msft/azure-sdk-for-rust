@@ -14,8 +14,9 @@ use azure_core::{ClientOptions, Pipeline, Policy, Result, RetryOptions, Transpor
 use std::sync::Arc;
 
 pub struct BlobClient {
-    endpoint: Url,
-    pipeline: Pipeline,
+    //NYI GENERATED CODE SUPPORT: endpoint & pipeline being pub
+    pub endpoint: Url,
+    pub pipeline: Pipeline,
 }
 
 #[derive(Clone, Debug)]

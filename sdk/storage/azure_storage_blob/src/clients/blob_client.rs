@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+use crate::clients::units::*;
 use crate::policies::storage_headers_policy::StorageHeadersPolicy;
 use azure_core::credentials::TokenCredential;
 use azure_core::headers::HeaderName;
@@ -12,18 +13,20 @@ use azure_identity::DefaultAzureCredentialBuilder;
 use blob_storage::blob_blob::{BlobBlobDownloadOptions, BlobBlobGetPropertiesOptions};
 use blob_storage::blob_client::BlobClientOptions;
 use blob_storage::BlobClient as GeneratedBlobClient;
+use std::marker::PhantomData;
 use std::sync::Arc;
 use uuid::Uuid;
 
-pub struct BlobClient {
-    endpoint: String,
-    container_name: String,
-    blob_name: String,
-    credential: Option<Arc<dyn TokenCredential>>,
-    client: GeneratedBlobClient,
+pub struct BlobClient<BlobType = Unset> {
+    pub(crate) blob_type: PhantomData<BlobType>,
+    pub(crate) endpoint: String,
+    pub(crate) container_name: String,
+    pub(crate) blob_name: String,
+    pub(crate) credential: Option<Arc<dyn TokenCredential>>,
+    pub(crate) client: GeneratedBlobClient,
 }
 
-impl BlobClient {
+impl BlobClient<Unset> {
     const VERSION_ID: &'static str = ("2024-08-04");
 
     pub fn new(
@@ -60,12 +63,27 @@ impl BlobClient {
             GeneratedBlobClient::with_no_credential(endpoint.clone(), Some(options.clone()))?;
 
         Ok(Self {
+            blob_type: PhantomData::<Unset>,
             endpoint: endpoint.clone(),
             container_name: container_name.clone(),
             blob_name: blob_name.clone(),
             credential,
             client: client,
         })
+    }
+
+    pub async fn as_append_blob(&self) -> BlobClient<Append> {
+        BlobClient {
+            blob_type: PhantomData::<Append>,
+            endpoint: self.endpoint.clone(),
+            container_name: self.container_name.clone(),
+            blob_name: self.blob_name.clone(),
+            credential: self.credential.clone(),
+            client: GeneratedBlobClient {
+                endpoint: self.client.endpoint.clone(),
+                pipeline: self.client.pipeline.clone(),
+            },
+        }
     }
 
     pub async fn download_blob(
@@ -103,21 +121,12 @@ impl BlobClient {
             )
             .await
     }
+}
 
-    // pub fn get_container_client(&self) ->
-
-    // pub async fn get_blob_properties(&self) -> Result<Response> {
-    //     // Build the get properties request itself
-    //     let mut request = Request::new(self.url.to_owned(), Method::Head); // This is technically cloning
-    //     BlobClient::finalize_request(&mut request);
-
-    //     // Send the request
-    //     let response = self.pipeline.send(&(Context::new()), &mut request).await?;
-    //     println!("Response headers: {:?}", response);
-
-    //     // Return the entire response for now
-    //     Ok(response)
-    // }
+impl<Append> BlobClient<Append> {
+    pub async fn append_block(&self) {
+        todo!()
+    }
 }
 
 #[cfg(test)]
@@ -216,38 +225,18 @@ mod tests {
             response.into_body().collect_string().await.unwrap()
         );
     }
+
+    #[tokio::test]
+    async fn test_get_append_client() {
+        let blob_client = BlobClient::new(
+            String::from("https://vincenttranpublicac.blob.core.windows.net/"),
+            String::from("public"),
+            String::from("hello.txt"),
+            None,
+            Some(BlobClientOptions::default()),
+        )
+        .unwrap();
+        let append_block_client = blob_client.as_append_blob().await;
+        append_block_client.append_block();
+    }
 }
-
-//     #[tokio::test]
-//     async fn test_get_blob_properties() {
-//         let credential = DefaultAzureCredentialBuilder::default()
-//             .build()
-//             .map(|cred| Arc::new(cred) as Arc<dyn TokenCredential>)
-//             .expect("Failed to build credential");
-
-//         // Create a Blob Client
-//         let my_blob_client = BlobClient::new(
-//             String::from("vincenttranstock"),
-//             String::from("acontainer108f32e8"),
-//             String::from("hello.txt"),
-//             credential,
-//             None,
-//         );
-
-//         // Get response
-//         let ret = my_blob_client
-//             .get_blob_properties()
-//             .await
-//             .expect("Request failed!");
-//         let (status_code, headers, _response_body) = ret.deconstruct();
-
-//         // Assert equality
-//         assert_eq!(status_code, azure_core::StatusCode::Ok);
-//         assert_eq!(
-//             headers
-//                 .get_str(&HeaderName::from_static("content-length"))
-//                 .expect("Failed getting content-length header"),
-//             "10"
-//         )
-//     }
-// }

@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+use crate::clients::units::*;
 use crate::policies::storage_headers_policy::StorageHeadersPolicy;
 use azure_core::credentials::TokenCredential;
 use azure_core::headers::HeaderName;
@@ -18,6 +19,7 @@ use blob_storage::blob_container::{
 use blob_storage::blob_service::BlobServiceGetPropertiesOptions;
 use blob_storage::models::StorageServiceProperties;
 use blob_storage::BlobClient as GeneratedBlobClient;
+use std::marker::PhantomData;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -88,14 +90,17 @@ impl BlobServiceClient {
         blob_name: String,
         options: Option<BlobClientOptions>,
     ) -> BlobClient {
-        BlobClient::new(
-            self.endpoint.clone(),
-            container_name.clone(),
-            blob_name.clone(),
-            self.credential.clone(),
-            options,
-        )
-        .unwrap()
+        BlobClient {
+            blob_type: PhantomData::<Unset>,
+            endpoint: self.client.endpoint.clone().to_string(),
+            container_name: container_name,
+            blob_name: blob_name,
+            credential: self.credential.clone(),
+            client: GeneratedBlobClient {
+                endpoint: self.client.endpoint.clone(),
+                pipeline: self.client.pipeline.clone(),
+            },
+        }
     }
 }
 #[cfg(test)]
