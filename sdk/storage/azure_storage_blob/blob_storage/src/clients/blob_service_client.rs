@@ -1,8 +1,17 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+use crate::blob_blob::BlobBlobGetPropertiesOptions;
+use crate::blob_client::BlobClientOptions;
+use crate::blob_container::{
+    BlobContainer, BlobContainerCreateOptions, BlobContainerGetAccountInfoOptions,
+    BlobContainerGetPropertiesOptions,
+};
+use crate::blob_service::BlobServiceGetPropertiesOptions;
 use crate::clients::units::*;
+use crate::models::StorageServiceProperties;
 use crate::policies::storage_headers_policy::StorageHeadersPolicy;
+use crate::BlobClient as GeneratedBlobClient;
 use azure_core::credentials::TokenCredential;
 use azure_core::headers::HeaderName;
 use azure_core::{
@@ -10,15 +19,6 @@ use azure_core::{
     Result, Url,
 };
 use azure_identity::DefaultAzureCredentialBuilder;
-use blob_storage::blob_blob::BlobBlobGetPropertiesOptions;
-use blob_storage::blob_client::BlobClientOptions;
-use blob_storage::blob_container::{
-    BlobContainer, BlobContainerCreateOptions, BlobContainerGetAccountInfoOptions,
-    BlobContainerGetPropertiesOptions,
-};
-use blob_storage::blob_service::BlobServiceGetPropertiesOptions;
-use blob_storage::models::StorageServiceProperties;
-use blob_storage::BlobClient as GeneratedBlobClient;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use uuid::Uuid;
