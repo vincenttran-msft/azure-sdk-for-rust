@@ -7,9 +7,11 @@ use crate::blob_container::{
     BlobContainer, BlobContainerCreateOptions, BlobContainerGetAccountInfoOptions,
     BlobContainerGetPropertiesOptions,
 };
-use crate::blob_service::BlobServiceGetPropertiesOptions;
+use crate::blob_service::{
+    BlobServiceGetPropertiesOptions, BlobServiceListContainersSegmentOptions,
+};
 use crate::clients::units::*;
-use crate::models::StorageServiceProperties;
+use crate::models::{ListContainersSegmentResponse, StorageServiceProperties};
 use crate::policies::storage_headers_policy::StorageHeadersPolicy;
 use crate::BlobClient as GeneratedBlobClient;
 use azure_core::credentials::TokenCredential;
@@ -102,6 +104,19 @@ impl BlobServiceClient {
             },
         }
     }
+
+    pub async fn list_containers(
+        &self,
+        options: Option<BlobServiceListContainersSegmentOptions<'_>>,
+    ) -> Result<Response<ListContainersSegmentResponse>> {
+        self.client
+            .get_blob_service_client()
+            .list_containers_segment(
+                String::from(Self::VERSION_ID), //svc version
+                Some(BlobServiceListContainersSegmentOptions::default()),
+            )
+            .await
+    }
 }
 #[cfg(test)]
 mod tests {
@@ -149,6 +164,28 @@ mod tests {
 
         let response = blob_client
             .get_blob_properties(Some(BlobBlobGetPropertiesOptions::default()))
+            .await
+            .unwrap();
+        print!("{:?}", response);
+        print!(
+            "\n{:?}",
+            response.into_body().collect_string().await.unwrap()
+        );
+    }
+
+    #[tokio::test]
+    // Don't forget to az-login
+    async fn test_list_containers() {
+        let credential = DefaultAzureCredentialBuilder::default().build().unwrap();
+        let service_client = BlobServiceClient::new(
+            String::from("https://vincenttranstock.blob.core.windows.net/"),
+            Some(credential),
+            Some(BlobClientOptions::default()),
+        )
+        .unwrap();
+
+        let response = service_client
+            .list_containers(Some(BlobServiceListContainersSegmentOptions::default()))
             .await
             .unwrap();
         print!("{:?}", response);

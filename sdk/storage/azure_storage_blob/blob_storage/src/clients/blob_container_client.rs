@@ -4,8 +4,9 @@
 use crate::blob_client::BlobClientOptions;
 use crate::blob_container::{
     BlobContainer, BlobContainerCreateOptions, BlobContainerGetAccountInfoOptions,
-    BlobContainerGetPropertiesOptions,
+    BlobContainerGetPropertiesOptions, BlobContainerListBlobFlatSegmentOptions,
 };
+use crate::models::ListBlobsFlatSegmentResponse;
 use crate::policies::storage_headers_policy::StorageHeadersPolicy;
 use crate::BlobClient as GeneratedBlobClient;
 use azure_core::credentials::TokenCredential;
@@ -108,6 +109,20 @@ impl ContainerClient {
             )
             .await
     }
+
+    pub async fn list_blobs(
+        &self,
+        options: Option<BlobContainerListBlobFlatSegmentOptions<'_>>,
+    ) -> Result<Response<ListBlobsFlatSegmentResponse>> {
+        self.client
+            .get_blob_container_client()
+            .list_blob_flat_segment(
+                self.container_name.clone(),
+                String::from(Self::VERSION_ID), //svc version
+                Some(BlobContainerListBlobFlatSegmentOptions::default()),
+            )
+            .await
+    }
 }
 #[cfg(test)]
 mod tests {
@@ -125,6 +140,29 @@ mod tests {
         .unwrap();
         let response = container_client
             .get_container_properties(Some(BlobContainerGetPropertiesOptions::default()))
+            .await
+            .unwrap();
+        print!("{:?}", response);
+        print!(
+            "\n{:?}",
+            response.into_body().collect_string().await.unwrap()
+        );
+    }
+
+    #[tokio::test]
+    // Don't forget to az-login
+    // TODO: Look into the return type, how do we make it more comprehensible
+    async fn test_list_blobs_auth() {
+        let credential = DefaultAzureCredentialBuilder::default().build().unwrap();
+        let container_client = ContainerClient::new(
+            String::from("https://vincenttranstock.blob.core.windows.net/"),
+            String::from("acontainer108f32e8"),
+            Some(credential),
+            Some(BlobClientOptions::default()),
+        )
+        .unwrap();
+        let response = container_client
+            .list_blobs(Some(BlobContainerListBlobFlatSegmentOptions::default()))
             .await
             .unwrap();
         print!("{:?}", response);
