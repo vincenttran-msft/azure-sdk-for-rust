@@ -34,15 +34,26 @@ impl BlobBlockBlob {
         let options = options.unwrap_or_default();
         let mut ctx = options.method_options.context();
         let mut url = self.endpoint.clone();
+        //let mut path = String::from("/{containerName}/{blob}?comp=blocklist");
         let mut path = String::from("/?comp=blocklist/{containerName}/{blob}");
         path = path.replace("{blob}", &blob.into());
         path = path.replace("{containerName}", &container_name.into());
         url.set_path(&path);
+
+        // Generated Code Issue
+        // Issue: Some characters, '?' are being %-encoded when they shouldn't be. This is due to the use of set_path()
+        // [Proposed Change Start]
+        // Before URL is sent to request, replace "%3F" -> "?"
+        let mut url = Url::parse(&url.as_str().replace("%3F", "?"))?;
+        // [Proposed Change End]
+
         if let Some(timeout) = options.timeout {
             url.query_pairs_mut()
                 .append_pair("timeout", &timeout.to_string());
         }
+
         let mut request = Request::new(url, Method::Put);
+
         request.insert_header("accept", "application/json");
         if let Some(transactional_content_md5) = options.transactional_content_md5 {
             request.insert_header("content-md5", transactional_content_md5);
@@ -121,7 +132,15 @@ impl BlobBlockBlob {
             request.insert_header("x-ms-tags", blob_tags_string);
         }
         request.insert_header("x-ms-version", version.into());
+
+        // Generated Code Issue
+        // Issue: MissingRequiredHeader -- "x-ms-blob-type"
+        // [Proposed Change Start
+        // request.insert_header("x-ms-blob-type", "BlockBlob");
+        // [Proposed Change End]]
+
         request.set_body(blocks);
+        println!("\n\n{:?}\n\n", request.url().clone());
         self.pipeline.send(&mut ctx, &mut request).await
     }
 
@@ -300,13 +319,23 @@ impl BlobBlockBlob {
         let mut path = String::from("/{containerName}/{blob}?comp=block");
         path = path.replace("{blob}", &blob.into());
         path = path.replace("{containerName}", &container_name.into());
+
+        // Generated Code Issue
+        // Issue: Some characters, '?' are being %-encoded when they shouldn't be. This is due to the use of set_path()
+        // [Proposed Change Start]
+        // Before URL is sent to request, replace "%3F" -> "?"
+        let mut url = Url::parse(&url.as_str().replace("%3F", "?"))?;
+        // [Proposed Change End]
+
         url.set_path(&path);
+
         url.query_pairs_mut()
             .append_pair("blockid", &block_id.into());
         if let Some(timeout) = options.timeout {
             url.query_pairs_mut()
                 .append_pair("timeout", &timeout.to_string());
         }
+
         let mut request = Request::new(url, Method::Put);
         request.insert_header("accept", "application/json");
         request.insert_header("content-length", content_length.to_string());
@@ -336,6 +365,13 @@ impl BlobBlockBlob {
             request.insert_header("x-ms-lease-id", lease_id);
         }
         request.insert_header("x-ms-version", version.into());
+
+        // Generated Code Issue
+        // Issue: MissingRequiredHeader -- "x-ms-blob-type"
+        // [Proposed Change Start
+        request.insert_header("x-ms-blob-type", "BlockBlob");
+        // [Proposed Change End]
+
         request.set_body(body);
         self.pipeline.send(&mut ctx, &mut request).await
     }
@@ -443,6 +479,14 @@ impl BlobBlockBlob {
             url.query_pairs_mut()
                 .append_pair("timeout", &timeout.to_string());
         }
+
+        // Generated Code Issue
+        // Issue: Some characters, '?' are being %-encoded when they shouldn't be. This is due to the use of set_path()
+        // [Proposed Change Start]
+        // Before URL is sent to request, replace "%3F" -> "?"
+        let url = Url::parse(&url.as_str().replace("%3F", "?"))?;
+        // [Proposed Change End]
+
         let mut request = Request::new(url, Method::Put);
         request.insert_header("accept", "application/json");
         if let Some(transactional_content_md5) = options.transactional_content_md5 {
@@ -526,6 +570,13 @@ impl BlobBlockBlob {
         }
         request.insert_header("x-ms-version", version.into());
         request.set_body(body);
+
+        // Generated Code Issue
+        // Issue: MissingRequiredHeader -- "x-ms-blob-type"
+        // [Proposed Change Start
+        request.insert_header("x-ms-blob-type", "BlockBlob");
+        // [Proposed Change End]
+
         self.pipeline.send(&mut ctx, &mut request).await
     }
 }
