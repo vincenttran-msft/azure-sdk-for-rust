@@ -599,7 +599,6 @@ impl BlobBlob {
             request.insert_header("x-ms-lease-id", lease_id);
         }
         request.insert_header("x-ms-version", version.into());
-        print!("\n***{:?}***\n", request.clone());
         self.pipeline.send(&mut ctx, &mut request).await
     }
 

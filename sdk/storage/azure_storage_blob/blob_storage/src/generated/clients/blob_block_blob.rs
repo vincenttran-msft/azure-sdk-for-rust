@@ -335,7 +335,6 @@ impl BlobBlockBlob {
             url.query_pairs_mut()
                 .append_pair("timeout", &timeout.to_string());
         }
-
         let mut request = Request::new(url, Method::Put);
         request.insert_header("accept", "application/json");
         request.insert_header("content-length", content_length.to_string());
