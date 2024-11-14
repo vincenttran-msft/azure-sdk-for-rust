@@ -13,7 +13,7 @@ use azure_core::credentials::TokenCredential;
 use azure_core::headers::HeaderName;
 use azure_core::{
     AsClientOptions, BearerTokenCredentialPolicy, Context, Method, Policy, Request, Response,
-    Result, Url,
+    Result, StatusCode, Url,
 };
 use azure_identity::DefaultAzureCredentialBuilder;
 use std::sync::Arc;
@@ -172,28 +172,31 @@ mod tests {
         );
     }
 
-    // #[tokio::test]
+    #[tokio::test]
     // Don't forget to az-login
-    // This fails for kind: HttpResponse { status: LengthRequired, error_code: None
-    // async fn test_create_container() {
-    //     let credential = DefaultAzureCredentialBuilder::default().build().unwrap();
-    //     let container_client = ContainerClient::new(
-    //         String::from("https://vincenttranstock.blob.core.windows.net/"),
-    //         String::from("mynewcontainer"),
-    //         Some(credential),
-    //         Some(BlobClientOptions::default()),
-    //     )
-    //     .unwrap();
-    //     let response = container_client
-    //         .create_container(Some(BlobContainerCreateOptions::default()))
-    //         .await
-    //         .unwrap();
-    //     print!("{:?}", response);
-    //     print!(
-    //         "\n{:?}",
-    //         response.into_body().collect_string().await.unwrap()
-    //     );
-    // }
+    async fn test_create_container() {
+        let credential = DefaultAzureCredentialBuilder::default().build().unwrap();
+        let container_client = ContainerClient::new(
+            String::from("https://vincenttranstock.blob.core.windows.net/"),
+            String::from("mynewcontainer"),
+            Some(credential),
+            Some(BlobClientOptions::default()),
+        )
+        .unwrap();
+        let response = container_client
+            .create_container(Some(BlobContainerCreateOptions::default()))
+            .await;
+
+        match response {
+            Ok(x) => {
+                println!("Created: {:?}", x);
+            }
+            Err(e) => {
+                assert_eq!(e.http_status(), Some(StatusCode::Conflict))
+            }
+        }
+    }
+
     #[tokio::test]
     // Don't forget to az-login
     async fn test_get_account_info_auth() {
