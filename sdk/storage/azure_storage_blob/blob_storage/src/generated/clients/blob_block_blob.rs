@@ -723,7 +723,7 @@ pub struct BlobBlockBlobUploadOptions<'a> {
     blob_content_language: Option<String>,
     blob_content_md5: Option<String>,
     blob_content_type: Option<String>,
-    blob_tags_string: Option<String>,
+    pub(crate) blob_tags_string: Option<String>, // NYI: Generated Code Change to make this visible to the crate
     encryption_algorithm: Option<String>,
     encryption_key: Option<String>,
     encryption_key_sha256: Option<String>,

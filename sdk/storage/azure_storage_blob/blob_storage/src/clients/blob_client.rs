@@ -17,6 +17,7 @@ use azure_core::{
     Response, Result, Url,
 };
 use azure_identity::DefaultAzureCredentialBuilder;
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -122,10 +123,45 @@ impl BlobClient<Unset> {
             .await
     }
 
+    fn url_encode(input: &str) -> String {
+        // TODO: Use some built-in or make this.. better :)
+        // URL-encode the input string
+        input
+            .chars()
+            .map(|c| match c {
+                ' ' => "%20".to_string(),
+                '&' => "\u{0026}".to_string(),
+                _ => c.to_string(),
+            })
+            .collect()
+    }
+
+    fn hashmap_to_query_string(params: HashMap<String, String>) -> String {
+        // TODO: Make this better
+        // Convert the HashMap to a query string
+        // Fun fact: these are NOT ordered. None of the built-in collections track order of insertion
+        let mut query_string = String::new();
+        for (key, value) in &params {
+            query_string.push_str(&format!("{}={}", key, value));
+            if !query_string.is_empty() {
+                query_string.push('&');
+            }
+        }
+
+        // Remove extra & sign
+        let mut chars = query_string.chars();
+        chars.next_back();
+        query_string = String::from(chars.as_str());
+
+        // URL-encode the query string
+        Self::url_encode(&query_string)
+    }
+
     pub async fn upload_blob(
         &self,
         data: RequestContent<Vec<u8>>,
         overwrite: Option<bool>,
+        tags: Option<HashMap<String, String>>,
         mut options: Option<BlobBlockBlobUploadOptions<'_>>,
     ) -> Result<Response<()>> {
         //For now, this will only be Block Blob hot-path
@@ -133,6 +169,15 @@ impl BlobClient<Unset> {
         // Check if they want overwrite, by default overwrite=False
         if overwrite.is_none() || overwrite.unwrap() == false {
             options.as_mut().unwrap().if_none_match = Some(String::from("*"));
+        }
+
+        // Parse tags if any, convert to server-acceptable format
+        match tags {
+            Some(tag) => {
+                let parsed_tags = Self::hashmap_to_query_string(tag);
+                options.as_mut().unwrap().blob_tags_string = Some(parsed_tags)
+            }
+            None => {}
         }
 
         self.client
@@ -257,7 +302,7 @@ mod tests {
         let data = b"hello world".to_vec();
         let rq = RequestContent::from(data);
         let response = blob_client
-            .upload_blob(rq, None, Some(BlobBlockBlobUploadOptions::default()))
+            .upload_blob(rq, None, None, Some(BlobBlockBlobUploadOptions::default()))
             .await
             .unwrap();
         print!("{:?}", response);
@@ -269,7 +314,6 @@ mod tests {
 
     #[tokio::test]
     // Need az login
-    // May fail for overwrite now since this is default overwrite=False
     async fn test_upload_blob_overwrite_true() {
         let credential = DefaultAzureCredentialBuilder::default().build().unwrap();
         let blob_client = BlobClient::new(
@@ -284,7 +328,49 @@ mod tests {
         let data = b"hello world".to_vec();
         let rq = RequestContent::from(data);
         let response = blob_client
-            .upload_blob(rq, Some(true), Some(BlobBlockBlobUploadOptions::default()))
+            .upload_blob(
+                rq,
+                Some(true),
+                None,
+                Some(BlobBlockBlobUploadOptions::default()),
+            )
+            .await
+            .unwrap();
+        print!("{:?}", response);
+        print!(
+            "\n{:?}",
+            response.into_body().collect_string().await.unwrap()
+        );
+    }
+
+    #[tokio::test]
+    // Need az login
+    async fn test_upload_blob_overwrite_true_with_tags() {
+        let credential = DefaultAzureCredentialBuilder::default().build().unwrap();
+        let blob_client = BlobClient::new(
+            String::from("https://vincenttranstock.blob.core.windows.net/"),
+            String::from("acontainer108f32e8"),
+            String::from("i-got-tags.txt"),
+            Some(credential),
+            Some(BlobClientOptions::default()),
+        )
+        .unwrap();
+
+        // Create tags
+        let mut tags_hashmap = HashMap::new();
+        tags_hashmap.insert("tag1 name".to_string(), "my tag".to_string());
+        tags_hashmap.insert("tag2".to_string(), "secondtag".to_string());
+        tags_hashmap.insert("tag3".to_string(), "thirdtag".to_string());
+
+        let data = b"hello world".to_vec();
+        let rq = RequestContent::from(data);
+        let response = blob_client
+            .upload_blob(
+                rq,
+                Some(true),
+                Some(tags_hashmap),
+                Some(BlobBlockBlobUploadOptions::default()),
+            )
             .await
             .unwrap();
         print!("{:?}", response);
