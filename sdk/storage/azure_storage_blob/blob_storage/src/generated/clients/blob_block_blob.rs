@@ -730,7 +730,7 @@ pub struct BlobBlockBlobUploadOptions<'a> {
     encryption_scope: Option<String>,
     if_match: Option<String>,
     if_modified_since: Option<OffsetDateTime>,
-    if_none_match: Option<String>,
+    pub(crate) if_none_match: Option<String>, // NYI: Generated Code Change to make this visible to the crate
     if_tags: Option<String>,
     if_unmodified_since: Option<OffsetDateTime>,
     immutability_policy_expiry: Option<String>,

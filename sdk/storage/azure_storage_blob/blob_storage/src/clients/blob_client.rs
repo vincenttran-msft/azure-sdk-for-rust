@@ -125,9 +125,15 @@ impl BlobClient<Unset> {
     pub async fn upload_blob(
         &self,
         data: RequestContent<Vec<u8>>,
-        options: Option<BlobBlockBlobUploadOptions<'_>>,
+        overwrite: Option<bool>,
+        mut options: Option<BlobBlockBlobUploadOptions<'_>>,
     ) -> Result<Response<()>> {
         //For now, this will only be Block Blob hot-path
+
+        // Check if they want overwrite, by default overwrite=False
+        if overwrite.is_none() || overwrite.unwrap() == false {
+            options.as_mut().unwrap().if_none_match = Some(String::from("*"));
+        }
 
         self.client
             .get_blob_block_blob_client()
@@ -236,6 +242,7 @@ mod tests {
 
     #[tokio::test]
     // Need az login
+    // May fail for overwrite now since this is default overwrite=False
     async fn test_upload_blob() {
         let credential = DefaultAzureCredentialBuilder::default().build().unwrap();
         let blob_client = BlobClient::new(
@@ -250,7 +257,34 @@ mod tests {
         let data = b"hello world".to_vec();
         let rq = RequestContent::from(data);
         let response = blob_client
-            .upload_blob(rq, Some(BlobBlockBlobUploadOptions::default()))
+            .upload_blob(rq, None, Some(BlobBlockBlobUploadOptions::default()))
+            .await
+            .unwrap();
+        print!("{:?}", response);
+        print!(
+            "\n{:?}",
+            response.into_body().collect_string().await.unwrap()
+        );
+    }
+
+    #[tokio::test]
+    // Need az login
+    // May fail for overwrite now since this is default overwrite=False
+    async fn test_upload_blob_overwrite_true() {
+        let credential = DefaultAzureCredentialBuilder::default().build().unwrap();
+        let blob_client = BlobClient::new(
+            String::from("https://vincenttranstock.blob.core.windows.net/"),
+            String::from("acontainer108f32e8"),
+            String::from("goodbye.txt"),
+            Some(credential),
+            Some(BlobClientOptions::default()),
+        )
+        .unwrap();
+
+        let data = b"hello world".to_vec();
+        let rq = RequestContent::from(data);
+        let response = blob_client
+            .upload_blob(rq, Some(true), Some(BlobBlockBlobUploadOptions::default()))
             .await
             .unwrap();
         print!("{:?}", response);
