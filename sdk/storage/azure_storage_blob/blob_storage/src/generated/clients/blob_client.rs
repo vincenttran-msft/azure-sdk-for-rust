@@ -14,13 +14,15 @@ use azure_core::{ClientOptions, Pipeline, Policy, Result, RetryOptions, Transpor
 use std::sync::Arc;
 
 pub struct BlobClient {
-    endpoint: Url,
-    pipeline: Pipeline,
+    //NYI GENERATED CODE SUPPORT: endpoint & pipeline being pub(crate)
+    pub(crate) endpoint: Url,
+    pub(crate) pipeline: Pipeline,
 }
 
 #[derive(Clone, Debug)]
 pub struct BlobClientOptions {
-    client_options: ClientOptions,
+    // NYI GENERATED CODE SUPPORT: client_options being pub(crate)
+    pub(crate) client_options: ClientOptions,
 }
 
 impl BlobClient {
@@ -29,7 +31,8 @@ impl BlobClient {
         options: Option<BlobClientOptions>,
     ) -> Result<Self> {
         let mut endpoint = Url::parse(endpoint.as_ref())?;
-        endpoint.query_pairs_mut().clear();
+        // NYI GENERATED CODE SUPPORTED: Remove call to query_pairs_mut().clear()
+        // endpoint.query_pairs_mut().clear();
         let options = options.unwrap_or_default();
         Ok(Self {
             endpoint,

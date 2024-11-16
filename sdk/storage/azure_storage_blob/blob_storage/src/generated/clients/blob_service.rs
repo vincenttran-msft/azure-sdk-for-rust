@@ -96,6 +96,14 @@ impl BlobService {
             url.query_pairs_mut()
                 .append_pair("timeout", &timeout.to_string());
         }
+
+        // Generated Code Issue
+        // Issue: Some characters, '?' are being %-encoded when they shouldn't be. This is due to the use of set_path()
+        // [Proposed Change Start]
+        // Before URL is sent to request, replace "%3F" -> "?"
+        let url = Url::parse(&url.as_str().replace("%3F", "?"))?;
+        // [Proposed Change End]
+
         let mut request = Request::new(url, Method::Get);
         request.insert_header("accept", "application/json");
         if let Some(request_id) = options.request_id {
@@ -181,6 +189,14 @@ impl BlobService {
             url.query_pairs_mut()
                 .append_pair("timeout", &timeout.to_string());
         }
+
+        // Generated Code Issue
+        // Issue: Some characters, '?' are being %-encoded when they shouldn't be. This is due to the use of set_path()
+        // [Proposed Change Start]
+        // Before URL is sent to request, replace "%3F" -> "?"
+        let url = Url::parse(&url.as_str().replace("%3F", "?"))?;
+        // [Proposed Change End]
+
         let mut request = Request::new(url, Method::Get);
         request.insert_header("accept", "application/json");
         if let Some(request_id) = options.request_id {

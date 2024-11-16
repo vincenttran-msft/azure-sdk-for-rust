@@ -12,7 +12,7 @@ use async_std::task::block_on;
 use azure_core::{RequestContent, Response};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
-use typespec_client_core::Model;
+use typespec_derive::Model;
 
 /// Represents an access policy.
 #[derive(Clone, Debug, Default, Deserialize, Model, Serialize)]

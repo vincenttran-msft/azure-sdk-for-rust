@@ -149,6 +149,14 @@ impl BlobContainer {
             url.query_pairs_mut()
                 .append_pair("timeout", &timeout.to_string());
         }
+
+        // Generated Code Issue
+        // Issue: Some characters, '?' are being %-encoded when they shouldn't be. This is due to the use of set_path()
+        // [Proposed Change Start]
+        // Before URL is sent to request, replace "%3F" -> "?"
+        let url = Url::parse(&url.as_str().replace("%3F", "?"))?;
+        // [Proposed Change End]
+
         let mut request = Request::new(url, Method::Put);
         request.insert_header("accept", "application/json");
         if let Some(access) = options.access {
@@ -167,6 +175,12 @@ impl BlobContainer {
             );
         }
         request.insert_header("x-ms-version", version.into());
+
+        // Generated Code Issue
+        // Issue: Hitting "LengthRequired" error
+        // [Proposed Change Start]
+        request.insert_header("content-length", "0");
+        // [Proposed Change End]
         self.pipeline.send(&mut ctx, &mut request).await
     }
 
@@ -295,6 +309,14 @@ impl BlobContainer {
         let mut path = String::from("/{containerName}?restype=account&comp=properties");
         path = path.replace("{containerName}", &container_name.into());
         url.set_path(&path);
+
+        // Generated Code Issue
+        // Issue: Some characters, '?' are being %-encoded when they shouldn't be. This is due to the use of set_path()
+        // [Proposed Change Start]
+        // Before URL is sent to request, replace "%3F" -> "?"
+        let url = Url::parse(&url.as_str().replace("%3F", "?"))?;
+        // [Proposed Change End]
+
         let mut request = Request::new(url, Method::Get);
         request.insert_header("accept", "application/json");
         if let Some(request_id) = options.request_id {
@@ -314,14 +336,27 @@ impl BlobContainer {
     ) -> Result<Response<()>> {
         let options = options.unwrap_or_default();
         let mut ctx = options.method_options.context();
+        println!("\nWhat is endpoint: {}\n", self.endpoint.as_str());
         let mut url = self.endpoint.clone();
+        println!("\nStep 1: {}\n", url.as_str());
         let mut path = String::from("/{containerName}?restype=container");
         path = path.replace("{containerName}", &container_name.into());
+
         url.set_path(&path);
+        println!("\nStep 2: {}\n", url.as_str());
+
         if let Some(timeout) = options.timeout {
             url.query_pairs_mut()
                 .append_pair("timeout", &timeout.to_string());
         }
+
+        // Generated Code Issue
+        // Issue: Some characters, '?' are being %-encoded when they shouldn't be. This is due to the use of set_path()
+        // [Proposed Change Start]
+        // Before URL is sent to request, replace "%3F" -> "?"
+        let url = Url::parse(&url.as_str().replace("%3F", "?"))?;
+        // [Proposed Change End]
+
         let mut request = Request::new(url, Method::Get);
         request.insert_header("accept", "application/json");
         if let Some(request_id) = options.request_id {
@@ -371,6 +406,14 @@ impl BlobContainer {
             url.query_pairs_mut()
                 .append_pair("timeout", &timeout.to_string());
         }
+
+        // Generated Code Issue
+        // Issue: Some characters, '?' are being %-encoded when they shouldn't be. This is due to the use of set_path()
+        // [Proposed Change Start]
+        // Before URL is sent to request, replace "%3F" -> "?"
+        let url = Url::parse(&url.as_str().replace("%3F", "?"))?;
+        // [Proposed Change End]
+
         let mut request = Request::new(url, Method::Get);
         request.insert_header("accept", "application/json");
         if let Some(request_id) = options.request_id {
