@@ -105,8 +105,7 @@ impl BlockBlobClient {
         blocks: RequestContent<BlockLookupList>,
         options: Option<BlockBlobClientCommitBlockListOptions<'_>>,
     ) -> Result<Response<BlockBlobClientCommitBlockListResult>> {
-        let response = self.client.commit_block_list(blocks, options).await?;
-        Ok(response)
+        self.client.commit_block_list(blocks, options).await
     }
 
     /// Creates a new block to be later committed as part of a blob.
@@ -125,11 +124,9 @@ impl BlockBlobClient {
         body: RequestContent<Bytes>,
         options: Option<BlockBlobClientStageBlockOptions<'_>>,
     ) -> Result<Response<BlockBlobClientStageBlockResult>> {
-        let response = self
-            .client
+        self.client
             .stage_block(block_id, content_length, body, options)
-            .await?;
-        Ok(response)
+            .await
     }
 
     /// Retrieves the list of blocks that have been uploaded as part of a block blob.
@@ -143,7 +140,6 @@ impl BlockBlobClient {
         list_type: BlockListType,
         options: Option<BlockBlobClientGetBlockListOptions<'_>>,
     ) -> Result<Response<BlockList>> {
-        let response = self.client.get_block_list(list_type, options).await?;
-        Ok(response)
+        self.client.get_block_list(list_type, options).await
     }
 }
