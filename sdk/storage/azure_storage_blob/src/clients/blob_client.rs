@@ -3,6 +3,7 @@
 
 use crate::{
     generated::clients::BlobClient as GeneratedBlobClient,
+    generated::clients::BlockBlobClient as GeneratedBlockBlobClient,
     generated::models::{
         BlobClientDownloadResult, BlobClientGetPropertiesResult,
         BlockBlobClientCommitBlockListResult, BlockBlobClientStageBlockResult,
@@ -12,8 +13,8 @@ use crate::{
     pipeline::StorageHeadersPolicy,
     BlobClientDeleteOptions, BlobClientDownloadOptions, BlobClientGetPropertiesOptions,
     BlobClientOptions, BlobClientSetMetadataOptions, BlobClientSetPropertiesOptions,
-    BlobClientSetTierOptions, BlockBlobClientCommitBlockListOptions,
-    BlockBlobClientGetBlockListOptions, BlockBlobClientStageBlockOptions,
+    BlobClientSetTierOptions, BlockBlobClient, BlockBlobClientCommitBlockListOptions,
+    BlockBlobClientGetBlockListOptions, BlockBlobClientOptions, BlockBlobClientStageBlockOptions,
     BlockBlobClientUploadOptions,
 };
 use azure_core::{
@@ -92,6 +93,26 @@ impl BlobClient {
     /// Gets the blob name of the Storage account this client is connected to.
     pub fn blob_name(&self) -> &str {
         &self.client.blob_name
+    }
+
+    /// Returns a new instance of BlockBlobClient.
+    ///
+    /// # Arguments
+    ///
+    /// * `blob_name` - The name of the blob.
+    /// * `options` - Optional configuration for the client.
+    pub fn block_blob_client(&self, blob_name: String) -> BlockBlobClient {
+        let generated_block_blob_client = GeneratedBlockBlobClient {
+            blob_name: blob_name.clone(),
+            container_name: self.client.container_name.clone(),
+            endpoint: self.client.endpoint.clone(),
+            pipeline: self.client.pipeline.clone(),
+            version: self.client.version.clone(),
+        };
+        BlockBlobClient {
+            endpoint: self.client.endpoint.clone(),
+            client: generated_block_blob_client,
+        }
     }
 
     /// Returns all user-defined metadata, standard HTTP properties, and system properties for the blob.
@@ -182,58 +203,6 @@ impl BlobClient {
         options: Option<BlobClientDeleteOptions<'_>>,
     ) -> Result<Response<()>> {
         self.client.delete(options).await
-    }
-
-    /// Writes to a blob based on blocks specified by the list of IDs and content that make up the blob.
-    ///
-    /// # Arguments
-    ///
-    /// * `blocks` - The list of Blob blocks to commit.
-    /// * `options` - Optional configuration for the request.
-    pub async fn commit_block_list(
-        &self,
-        blocks: RequestContent<BlockLookupList>,
-        options: Option<BlockBlobClientCommitBlockListOptions<'_>>,
-    ) -> Result<Response<BlockBlobClientCommitBlockListResult>> {
-        let block_blob_client = self.client.get_block_blob_client();
-        block_blob_client.commit_block_list(blocks, options).await
-    }
-
-    /// Creates a new block to be later committed as part of a blob.
-    ///
-    /// # Arguments
-    ///
-    /// * `block_id` - The unique identifier for the block. The identifier should be less than or equal to 64 bytes in size.
-    ///   For a given blob, the `block_id` must be the same size for each block.
-    /// * `content_length` - Total length of the blob data to be staged.
-    /// * `data` - The content of the block.
-    /// * `options` - Optional configuration for the request.
-    pub async fn stage_block(
-        &self,
-        block_id: Vec<u8>,
-        content_length: u64,
-        body: RequestContent<Bytes>,
-        options: Option<BlockBlobClientStageBlockOptions<'_>>,
-    ) -> Result<Response<BlockBlobClientStageBlockResult>> {
-        let block_blob_client = self.client.get_block_blob_client();
-        block_blob_client
-            .stage_block(block_id, content_length, body, options)
-            .await
-    }
-
-    /// Retrieves the list of blocks that have been uploaded as part of a block blob.
-    ///
-    /// # Arguments
-    ///
-    /// * `list_type` - Specifies whether to return the list of committed blocks, uncommitted blocks, or both lists together.
-    /// * `options` - Optional configuration for the request.
-    pub async fn get_block_list(
-        &self,
-        list_type: BlockListType,
-        options: Option<BlockBlobClientGetBlockListOptions<'_>>,
-    ) -> Result<Response<BlockList>> {
-        let block_blob_client = self.client.get_block_blob_client();
-        block_blob_client.get_block_list(list_type, options).await
     }
 
     /// Sets the tier on a blob. Standard tiers are only applicable for Block blobs, while Premium tiers are only applicable
