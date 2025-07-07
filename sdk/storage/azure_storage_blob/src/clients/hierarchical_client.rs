@@ -5,7 +5,10 @@ use crate::{
     generated::clients::{
         HierarchicalClient as GeneratedHierarchicalClient, HierarchicalClientOptions,
     },
-    models::HierarchicalClientCreateOptions,
+    models::{
+        HierarchicalClientAppendOptions, HierarchicalClientCreateOptions,
+        HierarchicalClientFlushOptions, HierarchicalClientRenameOptions,
+    },
     pipeline::StorageHeadersPolicy,
     BlobClientOptions,
 };
@@ -13,7 +16,7 @@ use azure_core::{
     credentials::TokenCredential,
     http::{
         policies::{BearerTokenCredentialPolicy, Policy},
-        NoFormat, RawResponse, RequestContent, Response, Url,
+        NoFormat, RawResponse, Request, RequestContent, Response, Url,
     },
     Bytes, Result,
 };
@@ -61,6 +64,24 @@ impl HierarchicalClient<File> {
     ) -> Result<RawResponse> {
         self.client.create("file".to_string(), options).await
     }
+
+    pub async fn append_data(
+        &self,
+        data: RequestContent<Bytes>,
+        offset: i64,
+        length: i64,
+        options: Option<HierarchicalClientAppendOptions<'_>>,
+    ) -> Result<RawResponse> {
+        self.client.append_data(data, offset, length, options).await
+    }
+
+    pub async fn flush_data(
+        &self,
+        offset: i64,
+        options: Option<HierarchicalClientFlushOptions<'_>>,
+    ) -> Result<RawResponse> {
+        self.client.flush_data(offset, options).await
+    }
 }
 
 // Directory state specific functions
@@ -70,5 +91,13 @@ impl HierarchicalClient<Directory> {
         options: Option<HierarchicalClientCreateOptions<'_>>,
     ) -> Result<RawResponse> {
         self.client.create("directory".to_string(), options).await
+    }
+
+    pub async fn rename_directory(
+        &self,
+        new_name: String,
+        options: Option<HierarchicalClientRenameOptions<'_>>,
+    ) -> Result<RawResponse> {
+        self.client.rename_directory(new_name, options).await
     }
 }

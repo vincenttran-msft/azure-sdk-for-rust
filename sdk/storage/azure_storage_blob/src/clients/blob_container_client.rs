@@ -145,16 +145,4 @@ impl BlobContainerClient {
     ) -> Result<Response<BlobContainerClientGetPropertiesResult, NoFormat>> {
         self.client.get_properties(options).await
     }
-
-    /// Returns a list of the blobs under the specified container.
-    ///
-    /// # Arguments
-    ///
-    /// * `options` - Optional configuration for the request.
-    pub fn list_blobs(
-        &self,
-        options: Option<BlobContainerClientListBlobFlatSegmentOptions<'_>>,
-    ) -> Result<PageIterator<Response<ListBlobsFlatSegmentResponse, XmlFormat>>> {
-        self.client.list_blob_flat_segment(options)
-    }
 }
