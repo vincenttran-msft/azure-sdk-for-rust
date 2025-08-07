@@ -95,32 +95,6 @@ impl BlobClient {
         }
     }
 
-    /// Returns a new instance of file-state HierarchicalClient.
-    ///
-    /// # Arguments
-    ///
-    pub fn file_hns_client(&self) -> HierarchicalClient<File> {
-        HierarchicalClient {
-            endpoint: self.client.endpoint.clone(),
-            client: self.client.get_hierarchical_client(),
-            _marker: PhantomData,
-        }
-        .file()
-    }
-
-    /// Returns a new instance of directory-state HierarchicalClient.
-    ///
-    /// # Arguments
-    ///
-    pub fn directory_hns_client(&self) -> HierarchicalClient<Directory> {
-        HierarchicalClient {
-            endpoint: self.client.endpoint.clone(),
-            client: self.client.get_hierarchical_client(),
-            _marker: PhantomData,
-        }
-        .directory()
-    }
-
     /// Gets the endpoint of the Storage account this client is connected to.
     pub fn endpoint(&self) -> &Url {
         &self.endpoint

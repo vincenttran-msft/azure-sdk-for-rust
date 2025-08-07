@@ -745,17 +745,6 @@ impl BlobClient {
         }
     }
 
-    /// Returns a new instance of HierarchicalClient.
-    pub fn get_hierarchical_client(&self) -> HierarchicalClient {
-        HierarchicalClient {
-            blob_name: self.blob_name.clone(),
-            container_name: self.container_name.clone(),
-            endpoint: self.endpoint.clone(),
-            pipeline: self.pipeline.clone(),
-            version: self.version.clone(),
-        }
-    }
-
     /// Returns a new instance of PageBlobClient.
     pub fn get_page_blob_client(&self) -> PageBlobClient {
         PageBlobClient {

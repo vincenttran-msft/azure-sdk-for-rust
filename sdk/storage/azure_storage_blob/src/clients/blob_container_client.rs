@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 use crate::{
+    clients::hierarchical_client::{Directory, File},
     generated::clients::BlobContainerClient as GeneratedBlobContainerClient,
     generated::models::BlobContainerClientGetPropertiesResult,
     models::{
@@ -10,7 +11,7 @@ use crate::{
         BlobContainerClientSetMetadataOptions, ListBlobsFlatSegmentResponse,
     },
     pipeline::StorageHeadersPolicy,
-    BlobClient, BlobContainerClientOptions,
+    BlobClient, BlobContainerClientOptions, HierarchicalClient,
 };
 use azure_core::{
     credentials::TokenCredential,
@@ -20,7 +21,7 @@ use azure_core::{
     },
     Result,
 };
-use std::sync::Arc;
+use std::{marker::PhantomData, sync::Arc};
 
 /// A client to interact with a specified Azure storage container.
 pub struct BlobContainerClient {
@@ -85,6 +86,32 @@ impl BlobContainerClient {
         }
     }
 
+    /// Returns a new instance of file-state HierarchicalClient.
+    ///
+    /// # Arguments
+    ///
+    pub fn file_hns_client(&self, blob_name: String) -> HierarchicalClient<File> {
+        HierarchicalClient {
+            endpoint: self.client.endpoint.clone(),
+            client: self.client.get_hierarchical_client(blob_name),
+            _marker: PhantomData,
+        }
+        .file()
+    }
+
+    /// Returns a new instance of directory-state HierarchicalClient.
+    ///
+    /// # Arguments
+    ///
+    pub fn directory_hns_client(&self, blob_name: String) -> HierarchicalClient<Directory> {
+        HierarchicalClient {
+            endpoint: self.client.endpoint.clone(),
+            client: self.client.get_hierarchical_client(blob_name),
+            _marker: PhantomData,
+        }
+        .directory()
+    }
+
     /// Gets the endpoint of the Storage account this client is connected to.
     pub fn endpoint(&self) -> &Url {
         &self.endpoint
@@ -144,5 +171,17 @@ impl BlobContainerClient {
         options: Option<BlobContainerClientGetPropertiesOptions<'_>>,
     ) -> Result<Response<BlobContainerClientGetPropertiesResult, NoFormat>> {
         self.client.get_properties(options).await
+    }
+
+    /// Returns a list of the blobs under the specified container.
+    ///
+    /// # Arguments
+    ///
+    /// * `options` - Optional configuration for the request.
+    pub fn list_blobs(
+        &self,
+        options: Option<BlobContainerClientListBlobFlatSegmentOptions<'_>>,
+    ) -> Result<PageIterator<Response<ListBlobsFlatSegmentResponse, XmlFormat>>> {
+        self.client.list_blob_flat_segment(options)
     }
 }

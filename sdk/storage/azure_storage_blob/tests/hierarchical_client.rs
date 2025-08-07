@@ -16,7 +16,7 @@ async fn test(ctx: TestContext) -> Result<(), Box<dyn Error>> {
     let blob_client_2 = container_client.blob_client("singleton".to_string());
 
     // HNS File Client
-    let hns_file_client = blob_client_1.file_hns_client();
+    let hns_file_client = container_client.file_hns_client(blob_client_1.blob_name().into());
     hns_file_client.create(None).await?;
     // Append & Flush
     let data = b"abc";
@@ -26,7 +26,8 @@ async fn test(ctx: TestContext) -> Result<(), Box<dyn Error>> {
     hns_file_client.flush_data(3, None).await?;
 
     // HNS Directory Client
-    let hns_directory_client = blob_client_2.directory_hns_client();
+    let hns_directory_client =
+        container_client.directory_hns_client(blob_client_2.blob_name().into());
     hns_directory_client.create(None).await?;
     // Rename
     hns_directory_client
