@@ -91,6 +91,24 @@ impl HierarchicalClient {
         &self.endpoint
     }
 
+    pub async fn download(
+        &self,
+        options: Option<HierarchicalClientDownloadOptions<'_>>,
+    ) -> Result<RawResponse> {
+        let options = options.unwrap_or_default();
+        let ctx = Context::with_context(&options.method_options.context);
+        // Hack in the endpoint
+        let endpoint = "https://ruststoragedevhns.dfs.core.windows.net/".to_string();
+        let mut url = Url::parse(&endpoint)?;
+        let mut path = String::from("{fileSystem}/{path}");
+        path = path.replace("{path}", &self.blob_name);
+        path = path.replace("{fileSystem}", &self.container_name);
+        url = url.join(&path)?;
+        let mut request = Request::new(url, Method::Get);
+        request.insert_header("x-ms-version", &self.version);
+        self.pipeline.send(&ctx, &mut request).await
+    }
+
     pub async fn create(
         &self,
         resource_type: String,
@@ -176,6 +194,40 @@ impl HierarchicalClient {
         request.insert_header("x-ms-rename-source", &rename_source);
         self.pipeline.send(&ctx, &mut request).await
     }
+
+    pub async fn set_access_control(
+        &self,
+        options: Option<HierarchicalClientSetAccessControlOptions<'_>>,
+    ) -> Result<RawResponse> {
+        let options = options.unwrap_or_default();
+        let ctx = Context::with_context(&options.method_options.context);
+
+        // Hack in the endpoint
+        let endpoint = "https://ruststoragedevhns.dfs.core.windows.net/".to_string();
+        let mut url = Url::parse(&endpoint)?;
+        let mut path = String::from("{fileSystem}/{path}?action=setAccessControl");
+        path = path.replace("{path}", &self.blob_name);
+        path = path.replace("{fileSystem}", &self.container_name);
+        url = url.join(&path)?;
+        let mut request = Request::new(url, Method::Patch);
+
+        if let Some(owner) = &options.owner {
+            request.insert_header("x-ms-owner", owner);
+        }
+        if let Some(group) = &options.group {
+            request.insert_header("x-ms-group", group);
+        }
+        if let Some(permissions) = &options.permissions {
+            request.insert_header("x-ms-permissions", permissions);
+        }
+        if let Some(acl) = &options.acl {
+            request.insert_header("x-ms-acl", acl);
+        }
+
+        request.insert_header("x-ms-version", &self.version);
+        request.insert_header("content-length", "0");
+        self.pipeline.send(&ctx, &mut request).await
+    }
 }
 
 #[derive(Clone, Default, SafeDebug)]
@@ -185,7 +237,31 @@ pub struct HierarchicalClientCreateOptions<'a> {
 }
 
 #[derive(Clone, Default, SafeDebug)]
+pub struct HierarchicalClientSetAccessControlOptions<'a> {
+    /// Allows customization of the method call.
+    pub method_options: ClientMethodOptions<'a>,
+
+    /// Optional owner of the resource.
+    pub owner: Option<String>,
+
+    /// Optional group associated with the resource.
+    pub group: Option<String>,
+
+    /// Optional permissions string.
+    pub permissions: Option<String>,
+
+    /// Optional access control list.
+    pub acl: Option<String>,
+}
+
+#[derive(Clone, Default, SafeDebug)]
 pub struct HierarchicalClientAppendOptions<'a> {
+    /// Allows customization of the method call.
+    pub method_options: ClientMethodOptions<'a>,
+}
+
+#[derive(Clone, Default, SafeDebug)]
+pub struct HierarchicalClientDownloadOptions<'a> {
     /// Allows customization of the method call.
     pub method_options: ClientMethodOptions<'a>,
 }
