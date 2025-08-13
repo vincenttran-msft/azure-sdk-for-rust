@@ -7,7 +7,8 @@ use crate::{
     },
     models::{
         HierarchicalClientAppendOptions, HierarchicalClientCreateOptions,
-        HierarchicalClientFlushOptions, HierarchicalClientRenameOptions,
+        HierarchicalClientDownloadOptions, HierarchicalClientFlushOptions,
+        HierarchicalClientRenameOptions, HierarchicalClientSetAccessControlOptions,
     },
     pipeline::StorageHeadersPolicy,
     BlobClientOptions,
@@ -82,6 +83,20 @@ impl HierarchicalClient<File> {
     ) -> Result<RawResponse> {
         self.client.flush_data(offset, options).await
     }
+
+    pub async fn set_access_control(
+        &self,
+        options: Option<HierarchicalClientSetAccessControlOptions<'_>>,
+    ) -> Result<RawResponse> {
+        self.client.set_access_control(options).await
+    }
+
+    pub async fn download(
+        &self,
+        options: Option<HierarchicalClientDownloadOptions<'_>>,
+    ) -> Result<RawResponse> {
+        self.client.download(options).await
+    }
 }
 
 // Directory state specific functions
@@ -99,5 +114,15 @@ impl HierarchicalClient<Directory> {
         options: Option<HierarchicalClientRenameOptions<'_>>,
     ) -> Result<RawResponse> {
         self.client.rename_directory(new_name, options).await
+    }
+
+    // Get a FileClient under current directory
+    pub fn file_client(mut self, file_name: String) -> HierarchicalClient<File> {
+        self.client.blob_name = format!("{}/{}", self.client.blob_name, file_name);
+        HierarchicalClient {
+            endpoint: self.endpoint,
+            client: self.client,
+            _marker: PhantomData::<File>,
+        }
     }
 }

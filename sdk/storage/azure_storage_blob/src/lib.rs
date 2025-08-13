@@ -16,7 +16,8 @@ pub use clients::*;
 pub mod models {
     pub use crate::generated::clients::{
         HierarchicalClientAppendOptions, HierarchicalClientCreateOptions,
-        HierarchicalClientFlushOptions, HierarchicalClientRenameOptions,
+        HierarchicalClientDownloadOptions, HierarchicalClientFlushOptions,
+        HierarchicalClientRenameOptions, HierarchicalClientSetAccessControlOptions,
     };
     pub use crate::generated::models::{
         AccessTierOptional, ArchiveStatus, BlobClientDeleteOptions, BlobClientDownloadOptions,
