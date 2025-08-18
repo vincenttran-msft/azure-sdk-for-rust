@@ -58,7 +58,7 @@ async fn sample(ctx: TestContext) -> Result<(), Box<dyn Error>> {
     let documents_dir_client = container_client.directory_client("Documents".into());
     documents_dir_client.create(None).await?;
 
-    // Add "cat.txt" to Pictures
+    // Setup sub-directory 2025, Add "cat.txt" to 2025
     let dir_client_2025 = pictures_dir_client.sub_directory("2025".into());
     dir_client_2025.create(None).await?;
     let cat_client = dir_client_2025.file_client("cat.txt".into()).blob_client();
