@@ -3,7 +3,8 @@
 
 use crate::{
     generated::clients::{
-        HierarchicalClient as GeneratedHierarchicalClient, HierarchicalClientOptions,
+        BlobClient as GeneratedBlobClient, HierarchicalClient as GeneratedHierarchicalClient,
+        HierarchicalClientOptions,
     },
     models::{
         HierarchicalClientAppendOptions, HierarchicalClientCreateOptions,
@@ -11,7 +12,7 @@ use crate::{
         HierarchicalClientRenameOptions, HierarchicalClientSetAccessControlOptions,
     },
     pipeline::StorageHeadersPolicy,
-    BlobClientOptions,
+    BlobClient, BlobClientOptions,
 };
 use azure_core::{
     credentials::TokenCredential,
@@ -36,13 +37,26 @@ pub struct HierarchicalClient<T> {
 }
 
 // Generic type, shared functionality
-impl<T> HierarchicalClient<T> {}
+impl<T> HierarchicalClient<T> {
+    pub fn blob_client(&self) -> BlobClient {
+        BlobClient {
+            endpoint: self.client.endpoint.clone(),
+            client: GeneratedBlobClient {
+                blob_name: self.client.blob_name.clone(),
+                container_name: self.client.container_name.clone(),
+                endpoint: self.client.endpoint.clone(),
+                pipeline: self.client.pipeline.clone(),
+                version: self.client.version.clone(),
+            },
+        }
+    }
+}
 
 // Conversion methods from No State -> State
 impl HierarchicalClient<()> {
     pub fn file(self) -> HierarchicalClient<File> {
         HierarchicalClient {
-            endpoint: self.endpoint,
+            endpoint: self.endpoint.clone(),
             client: self.client,
             _marker: PhantomData::<File>,
         }
@@ -50,7 +64,7 @@ impl HierarchicalClient<()> {
 
     pub fn directory(self) -> HierarchicalClient<Directory> {
         HierarchicalClient {
-            endpoint: self.endpoint,
+            endpoint: self.endpoint.clone(),
             client: self.client,
             _marker: PhantomData::<Directory>,
         }
@@ -90,13 +104,6 @@ impl HierarchicalClient<File> {
     ) -> Result<RawResponse> {
         self.client.set_access_control(options).await
     }
-
-    pub async fn download(
-        &self,
-        options: Option<HierarchicalClientDownloadOptions<'_>>,
-    ) -> Result<RawResponse> {
-        self.client.download(options).await
-    }
 }
 
 // Directory state specific functions
@@ -117,12 +124,35 @@ impl HierarchicalClient<Directory> {
     }
 
     // Get a FileClient under current directory
-    pub fn file_client(mut self, file_name: String) -> HierarchicalClient<File> {
-        self.client.blob_name = format!("{}/{}", self.client.blob_name, file_name);
+    pub fn file_client(&self, file_name: String) -> HierarchicalClient<File> {
+        let file_name = format!("{}/{}", self.client.blob_name, file_name);
+        let generated_client = GeneratedHierarchicalClient {
+            blob_name: file_name,
+            container_name: self.client.container_name.clone(),
+            endpoint: self.client.endpoint.clone(),
+            pipeline: self.client.pipeline.clone(),
+            version: self.client.version.clone(),
+        };
         HierarchicalClient {
-            endpoint: self.endpoint,
-            client: self.client,
+            endpoint: self.endpoint.clone(),
+            client: generated_client,
             _marker: PhantomData::<File>,
+        }
+    }
+
+    pub fn sub_directory(&self, blob_name: String) -> HierarchicalClient<Directory> {
+        let blob_name = format!("{}/{}", self.client.blob_name, blob_name);
+        let generated_client = GeneratedHierarchicalClient {
+            blob_name,
+            container_name: self.client.container_name.clone(),
+            endpoint: self.client.endpoint.clone(),
+            pipeline: self.client.pipeline.clone(),
+            version: self.client.version.clone(),
+        };
+        HierarchicalClient {
+            endpoint: self.endpoint.clone(),
+            client: generated_client,
+            _marker: PhantomData::<Directory>,
         }
     }
 }

@@ -90,7 +90,7 @@ impl BlobContainerClient {
     ///
     /// # Arguments
     ///
-    pub fn file_hns_client(&self, blob_name: String) -> HierarchicalClient<File> {
+    pub fn file_client(&self, blob_name: String) -> HierarchicalClient<File> {
         HierarchicalClient {
             endpoint: self.client.endpoint.clone(),
             client: self.client.get_hierarchical_client(blob_name),
@@ -103,7 +103,7 @@ impl BlobContainerClient {
     ///
     /// # Arguments
     ///
-    pub fn directory_hns_client(&self, blob_name: String) -> HierarchicalClient<Directory> {
+    pub fn directory_client(&self, blob_name: String) -> HierarchicalClient<Directory> {
         HierarchicalClient {
             endpoint: self.client.endpoint.clone(),
             client: self.client.get_hierarchical_client(blob_name),
