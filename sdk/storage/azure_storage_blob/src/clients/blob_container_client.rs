@@ -94,9 +94,8 @@ impl BlobContainerClient {
         HierarchicalClient {
             endpoint: self.client.endpoint.clone(),
             client: self.client.get_hierarchical_client(blob_name),
-            _marker: PhantomData,
+            _marker: PhantomData::<File>,
         }
-        .file()
     }
 
     /// Returns a new instance of directory-state HierarchicalClient.
@@ -107,9 +106,8 @@ impl BlobContainerClient {
         HierarchicalClient {
             endpoint: self.client.endpoint.clone(),
             client: self.client.get_hierarchical_client(blob_name),
-            _marker: PhantomData,
+            _marker: PhantomData::<Directory>,
         }
-        .directory()
     }
 
     /// Gets the endpoint of the Storage account this client is connected to.

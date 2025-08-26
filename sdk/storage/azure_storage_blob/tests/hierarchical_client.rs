@@ -40,9 +40,10 @@ async fn test(ctx: TestContext) -> Result<(), Box<dyn Error>> {
 #[recorded::test]
 async fn sample(ctx: TestContext) -> Result<(), Box<dyn Error>> {
     // Resources
-    let art = r#"_._     _,-'""`-._
+    let art = r#"
+    _._     _,-'""`-._
     (,-.`._,'(       |\`-/|
-    `-.-' \ )-`( , o o)
+         `-.-' \ )-`( , o o)
           `-    \`_`"'-"#;
     let data = b"1.A 2.B 3.C 4.D";
     let recording = ctx.recording();
@@ -61,9 +62,9 @@ async fn sample(ctx: TestContext) -> Result<(), Box<dyn Error>> {
     // Setup sub-directory 2025, Add "cat.txt" to 2025
     let dir_client_2025 = pictures_dir_client.sub_directory("2025".into());
     dir_client_2025.create(None).await?;
-    let cat_client = dir_client_2025.file_client("cat.txt".into()).blob_client();
-
-    cat_client
+    let cat_file_client = dir_client_2025.file_client("cat.txt".into());
+    cat_file_client
+        .blob_client()
         .upload(
             RequestContent::try_from(art)?,
             false,
@@ -73,10 +74,9 @@ async fn sample(ctx: TestContext) -> Result<(), Box<dyn Error>> {
         .await?;
 
     // Add "homework.txt" to Documents
-    let homework_blob_client = documents_dir_client
-        .file_client("homework.txt".into())
-        .blob_client();
-    homework_blob_client
+    let homework_file_client = documents_dir_client.file_client("homework.txt".into());
+    homework_file_client
+        .blob_client()
         .upload(
             RequestContent::from(data.to_vec()),
             false,
@@ -90,9 +90,6 @@ async fn sample(ctx: TestContext) -> Result<(), Box<dyn Error>> {
         permissions: Some("0777".to_string()),
         ..Default::default()
     };
-    let homework_file_client = container_client
-        .directory_client("Documents".into())
-        .file_client("homework.txt".into());
     homework_file_client
         .set_access_control(Some(set_acl_options))
         .await?;

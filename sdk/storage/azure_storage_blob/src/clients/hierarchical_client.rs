@@ -52,25 +52,6 @@ impl<T> HierarchicalClient<T> {
     }
 }
 
-// Conversion methods from No State -> State
-impl HierarchicalClient<()> {
-    pub fn file(self) -> HierarchicalClient<File> {
-        HierarchicalClient {
-            endpoint: self.endpoint.clone(),
-            client: self.client,
-            _marker: PhantomData::<File>,
-        }
-    }
-
-    pub fn directory(self) -> HierarchicalClient<Directory> {
-        HierarchicalClient {
-            endpoint: self.endpoint.clone(),
-            client: self.client,
-            _marker: PhantomData::<Directory>,
-        }
-    }
-}
-
 // File state specific functions
 impl HierarchicalClient<File> {
     pub async fn create(
