@@ -5,6 +5,7 @@ use crate::{
     clients::hierarchical_client::{Directory, File},
     generated::{
         clients::BlobClient as GeneratedBlobClient,
+        clients::HierarchicalClient as GeneratedHierarchicalClient,
         models::{
             BlobClientDownloadResult, BlobClientGetPropertiesResult,
             BlockBlobClientCommitBlockListResult, BlockBlobClientStageBlockResult,
@@ -92,6 +93,42 @@ impl BlobClient {
         BlockBlobClient {
             endpoint: self.client.endpoint.clone(),
             client: self.client.get_block_blob_client(),
+        }
+    }
+
+    /// Returns a new instance of file-state HierarchicalClient.
+    ///
+    /// # Arguments
+    ///
+    pub fn file_client(&self) -> HierarchicalClient<File> {
+        HierarchicalClient {
+            endpoint: self.client.endpoint.clone(),
+            client: GeneratedHierarchicalClient {
+                blob_name: self.client.blob_name.clone(),
+                container_name: self.client.container_name.clone(),
+                endpoint: self.client.endpoint.clone(),
+                pipeline: self.client.pipeline.clone(),
+                version: self.client.version.clone(),
+            },
+            _marker: PhantomData::<File>,
+        }
+    }
+
+    /// Returns a new instance of directory-state HierarchicalClient.
+    ///
+    /// # Arguments
+    ///
+    pub fn directory_client(&self) -> HierarchicalClient<Directory> {
+        HierarchicalClient {
+            endpoint: self.client.endpoint.clone(),
+            client: GeneratedHierarchicalClient {
+                blob_name: self.client.blob_name.clone(),
+                container_name: self.client.container_name.clone(),
+                endpoint: self.client.endpoint.clone(),
+                pipeline: self.client.pipeline.clone(),
+                version: self.client.version.clone(),
+            },
+            _marker: PhantomData::<Directory>,
         }
     }
 

@@ -73,10 +73,11 @@ async fn sample(ctx: TestContext) -> Result<(), Box<dyn Error>> {
         )
         .await?;
 
-    // Add "homework.txt" to Documents
-    let homework_file_client = documents_dir_client.file_client("homework.txt".into());
-    homework_file_client
-        .blob_client()
+    // Add "homework.txt" to Documents (Storing Blob Client Example)
+    let homework_blob_client = documents_dir_client
+        .file_client("homework.txt".into())
+        .blob_client();
+    homework_blob_client
         .upload(
             RequestContent::from(data.to_vec()),
             false,
@@ -90,7 +91,8 @@ async fn sample(ctx: TestContext) -> Result<(), Box<dyn Error>> {
         permissions: Some("0777".to_string()),
         ..Default::default()
     };
-    homework_file_client
+    homework_blob_client
+        .file_client()
         .set_access_control(Some(set_acl_options))
         .await?;
 
