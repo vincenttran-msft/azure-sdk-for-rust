@@ -21,12 +21,13 @@ use super::{
     BlockBlobClientCommitBlockListResult, BlockBlobClientQueryResult,
     BlockBlobClientStageBlockFromUrlResult, BlockBlobClientStageBlockResult,
     BlockBlobClientUploadBlobFromUrlResult, BlockBlobClientUploadResult, BlockList, CopyStatus,
-    FilterBlobSegment, LeaseDuration, LeaseState, LeaseStatus, ListBlobsFlatSegmentResponse,
-    ListBlobsHierarchySegmentResponse, PageBlobClientClearPagesResult,
-    PageBlobClientCopyIncrementalResult, PageBlobClientCreateResult, PageBlobClientResizeResult,
-    PageBlobClientSetSequenceNumberResult, PageBlobClientUploadPagesFromUrlResult,
-    PageBlobClientUploadPagesResult, PageList, PublicAccessType, RehydratePriority,
-    SignedIdentifier, SkuName, StorageServiceStats, UserDelegationKey,
+    FilterBlobSegment, HierarchicalBlobClientCreateResult, LeaseDuration, LeaseState, LeaseStatus,
+    ListBlobsFlatSegmentResponse, ListBlobsHierarchySegmentResponse,
+    PageBlobClientClearPagesResult, PageBlobClientCopyIncrementalResult,
+    PageBlobClientCreateResult, PageBlobClientResizeResult, PageBlobClientSetSequenceNumberResult,
+    PageBlobClientUploadPagesFromUrlResult, PageBlobClientUploadPagesResult, PageList,
+    PublicAccessType, RehydratePriority, SignedIdentifier, SkuName, StorageServiceStats,
+    UserDelegationKey,
 };
 use azure_core::{
     base64::decode,
@@ -2225,6 +2226,64 @@ impl FilterBlobSegmentHeaders for Response<FilterBlobSegment, XmlFormat> {
     }
 }
 
+/// Provides access to typed response headers for `HierarchicalBlobClient::create()`
+pub trait HierarchicalBlobClientCreateResultHeaders: private::Sealed {
+    fn content_md5(&self) -> Result<Option<Vec<u8>>>;
+    fn last_modified(&self) -> Result<Option<OffsetDateTime>>;
+    fn etag(&self) -> Result<Option<String>>;
+    fn encryption_key_sha256(&self) -> Result<Option<String>>;
+    fn encryption_scope(&self) -> Result<Option<String>>;
+    fn is_server_encrypted(&self) -> Result<Option<bool>>;
+    fn version_id(&self) -> Result<Option<String>>;
+}
+
+impl HierarchicalBlobClientCreateResultHeaders
+    for Response<HierarchicalBlobClientCreateResult, NoFormat>
+{
+    /// If the blob has an MD5 hash and this operation is to read the full blob, this response header is returned so that the
+    /// client can check for message content integrity.
+    fn content_md5(&self) -> Result<Option<Vec<u8>>> {
+        Headers::get_optional_with(self.headers(), &CONTENT_MD5, |h| decode(h.as_str()))
+    }
+
+    /// The date/time that the container was last modified.
+    fn last_modified(&self) -> Result<Option<OffsetDateTime>> {
+        Headers::get_optional_with(self.headers(), &LAST_MODIFIED, |h| {
+            parse_rfc7231(h.as_str())
+        })
+    }
+
+    /// The ETag contains a value that you can use to perform operations conditionally.
+    fn etag(&self) -> Result<Option<String>> {
+        Headers::get_optional_as(self.headers(), &ETAG)
+    }
+
+    /// The SHA-256 hash of the encryption key used to encrypt the blob. This header is only returned when the blob was encrypted
+    /// with a customer-provided key.
+    fn encryption_key_sha256(&self) -> Result<Option<String>> {
+        Headers::get_optional_as(self.headers(), &ENCRYPTION_KEY_SHA256)
+    }
+
+    /// If the blob has a MD5 hash, and if request contains range header (Range or x-ms-range), this response header is returned
+    /// with the value of the whole blob's MD5 value. This value may or may not be equal to the value returned in Content-MD5
+    /// header, with the latter calculated from the requested range
+    fn encryption_scope(&self) -> Result<Option<String>> {
+        Headers::get_optional_as(self.headers(), &ENCRYPTION_SCOPE)
+    }
+
+    /// The value of this header is set to true if the contents of the request are successfully encrypted using the specified
+    /// algorithm, and false otherwise.
+    fn is_server_encrypted(&self) -> Result<Option<bool>> {
+        Headers::get_optional_as(self.headers(), &REQUEST_SERVER_ENCRYPTED)
+    }
+
+    /// A DateTime value returned by the service that uniquely identifies the blob. The value of this header indicates the blob
+    /// version, and may be used in subsequent requests to access this version of the blob.
+    fn version_id(&self) -> Result<Option<String>> {
+        Headers::get_optional_as(self.headers(), &VERSION_ID)
+    }
+}
+
 /// Provides access to typed response headers for `BlobContainerClient::list_blob_flat_segment()`
 pub trait ListBlobsFlatSegmentResponseHeaders: private::Sealed {
     fn date(&self) -> Result<Option<OffsetDateTime>>;
@@ -2676,7 +2735,8 @@ mod private {
         BlobServiceClientGetAccountInfoResult, BlobTags, BlockBlobClientCommitBlockListResult,
         BlockBlobClientQueryResult, BlockBlobClientStageBlockFromUrlResult,
         BlockBlobClientStageBlockResult, BlockBlobClientUploadBlobFromUrlResult,
-        BlockBlobClientUploadResult, BlockList, FilterBlobSegment, ListBlobsFlatSegmentResponse,
+        BlockBlobClientUploadResult, BlockList, FilterBlobSegment,
+        HierarchicalBlobClientCreateResult, ListBlobsFlatSegmentResponse,
         ListBlobsHierarchySegmentResponse, PageBlobClientClearPagesResult,
         PageBlobClientCopyIncrementalResult, PageBlobClientCreateResult,
         PageBlobClientResizeResult, PageBlobClientSetSequenceNumberResult,
@@ -2728,6 +2788,7 @@ mod private {
     impl Sealed for Response<BlockBlobClientUploadResult, NoFormat> {}
     impl Sealed for Response<BlockList, XmlFormat> {}
     impl Sealed for Response<FilterBlobSegment, XmlFormat> {}
+    impl Sealed for Response<HierarchicalBlobClientCreateResult, NoFormat> {}
     impl Sealed for Response<ListBlobsFlatSegmentResponse, XmlFormat> {}
     impl Sealed for Response<ListBlobsHierarchySegmentResponse, XmlFormat> {}
     impl Sealed for Response<PageBlobClientClearPagesResult, NoFormat> {}
