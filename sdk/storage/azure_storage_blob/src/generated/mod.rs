@@ -8,6 +8,6 @@ pub mod models;
 pub use clients::{
     AppendBlobClient, AppendBlobClientOptions, BlobClient, BlobClientOptions, BlobContainerClient,
     BlobContainerClientOptions, BlobServiceClient, BlobServiceClientOptions, BlockBlobClient,
-    BlockBlobClientOptions, HierarchicalBlobClient, HierarchicalBlobClientOptions, PageBlobClient,
-    PageBlobClientOptions,
+    BlockBlobClientOptions, HierarchicalDirectoryClient, HierarchicalDirectoryClientOptions,
+    HierarchicalFileClient, HierarchicalFileClientOptions, PageBlobClient, PageBlobClientOptions,
 };

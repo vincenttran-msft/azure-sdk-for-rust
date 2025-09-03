@@ -2156,9 +2156,9 @@ pub struct BlockBlobClientUploadBlobFromUrlOptions<'a> {
     pub transactional_content_md5: Option<Vec<u8>>,
 }
 
-/// Options to be passed to `HierarchicalBlobClient::create()`
+/// Options to be passed to `HierarchicalDirectoryClient::create()`
 #[derive(Clone, Default, SafeDebug)]
-pub struct HierarchicalBlobClientCreateOptions<'a> {
+pub struct HierarchicalDirectoryClientCreateOptions<'a> {
     /// Optional. Sets the blob's cache control. If specified, this property is stored with the blob and returned with a read
     /// request.
     pub blob_cache_control: Option<String>,
@@ -2242,8 +2242,95 @@ pub struct HierarchicalBlobClientCreateOptions<'a> {
     /// Allows customization of the method call.
     pub method_options: ClientMethodOptions<'a>,
 
-    /// Optional. Indicates the tier to be set on the page blob.
-    pub tier: Option<PremiumPageBlobAccessTier>,
+    /// The timeout parameter is expressed in seconds. For more information, see [Setting Timeouts for Blob Service Operations.](https://docs.microsoft.com/en-us/rest/api/storageservices/fileservices/setting-timeouts-for-blob-service-operations)
+    pub timeout: Option<i32>,
+}
+
+/// Options to be passed to `HierarchicalFileClient::create()`
+#[derive(Clone, Default, SafeDebug)]
+pub struct HierarchicalFileClientCreateOptions<'a> {
+    /// Optional. Sets the blob's cache control. If specified, this property is stored with the blob and returned with a read
+    /// request.
+    pub blob_cache_control: Option<String>,
+
+    /// Optional. Sets the blob's content disposition. If specified, this property is stored with the blob and returned with a
+    /// read request.
+    pub blob_content_disposition: Option<String>,
+
+    /// Optional. Sets the blob's content encoding. If specified, this property is stored with the blob and returned with a read
+    /// request.
+    pub blob_content_encoding: Option<String>,
+
+    /// Optional. Set the blob's content language. If specified, this property is stored with the blob and returned with a read
+    /// request.
+    pub blob_content_language: Option<String>,
+
+    /// Optional. An MD5 hash of the blob content. Note that this hash is not validated, as the hashes for the individual blocks
+    /// were validated when each was uploaded.
+    pub blob_content_md5: Option<Vec<u8>>,
+
+    /// Optional. Sets the blob's content type. If specified, this property is stored with the blob and returned with a read request.
+    pub blob_content_type: Option<String>,
+
+    /// Set for page blobs only. The sequence number is a user-controlled value that you can use to track requests. The value
+    /// of the sequence number must be between 0 and 2^63 - 1.
+    pub blob_sequence_number: Option<i64>,
+
+    /// Optional. Used to set blob tags in various blob operations.
+    pub blob_tags_string: Option<String>,
+
+    /// An opaque, globally-unique, client-generated string identifier for the request.
+    pub client_request_id: Option<String>,
+
+    /// Optional. Version 2019-07-07 and later. Specifies the algorithm to use for encryption. If not specified, the default is
+    /// AES256.
+    pub encryption_algorithm: Option<EncryptionAlgorithmType>,
+
+    /// Optional. Version 2019-07-07 and later. Specifies the encryption key to use to encrypt the data provided in the request.
+    /// If not specified, the request will be encrypted with the root account key.
+    pub encryption_key: Option<String>,
+
+    /// Optional. Version 2019-07-07 and later. Specifies the SHA256 hash of the encryption key used to encrypt the data provided
+    /// in the request. This header is only used for encryption with a customer-provided key. If the request is authenticated
+    /// with a client token, this header should be specified using the SHA256 hash of the encryption key.
+    pub encryption_key_sha256: Option<String>,
+
+    /// Optional. Version 2019-07-07 and later. Specifies the encryption scope to use to encrypt the data provided in the request.
+    /// If not specified, the request will be encrypted with the root account key.
+    pub encryption_scope: Option<String>,
+
+    /// A condition that must be met in order for the request to be processed.
+    pub if_match: Option<String>,
+
+    /// A date-time value. A request is made under the condition that the resource has been modified since the specified date-time.
+    pub if_modified_since: Option<OffsetDateTime>,
+
+    /// A condition that must be met in order for the request to be processed.
+    pub if_none_match: Option<String>,
+
+    /// Specify a SQL where clause on blob tags to operate only on blobs with a matching value.
+    pub if_tags: Option<String>,
+
+    /// A date-time value. A request is made under the condition that the resource has not been modified since the specified date-time.
+    pub if_unmodified_since: Option<OffsetDateTime>,
+
+    /// Specifies the date time when the blobs immutability policy is set to expire.
+    pub immutability_policy_expiry: Option<OffsetDateTime>,
+
+    /// Specifies the immutability policy mode to set on the blob.
+    pub immutability_policy_mode: Option<ImmutabilityPolicyMode>,
+
+    /// If specified, the operation only succeeds if the resource's lease is active and matches this ID.
+    pub lease_id: Option<String>,
+
+    /// Specified if a legal hold should be set on the blob.
+    pub legal_hold: Option<bool>,
+
+    /// The metadata headers.
+    pub metadata: Option<HashMap<String, String>>,
+
+    /// Allows customization of the method call.
+    pub method_options: ClientMethodOptions<'a>,
 
     /// The timeout parameter is expressed in seconds. For more information, see [Setting Timeouts for Blob Service Operations.](https://docs.microsoft.com/en-us/rest/api/storageservices/fileservices/setting-timeouts-for-blob-service-operations)
     pub timeout: Option<i32>,

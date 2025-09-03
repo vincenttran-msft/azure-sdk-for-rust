@@ -959,9 +959,13 @@ pub struct GeoReplication {
     pub status: Option<GeoReplicationStatusType>,
 }
 
-/// Contains results for `HierarchicalBlobClient::create()`
+/// Contains results for `HierarchicalDirectoryClient::create()`
 #[derive(SafeDebug)]
-pub struct HierarchicalBlobClientCreateResult;
+pub struct HierarchicalDirectoryClientCreateResult;
+
+/// Contains results for `HierarchicalFileClient::create()`
+#[derive(SafeDebug)]
+pub struct HierarchicalFileClientCreateResult;
 
 /// Represents the JSON text configuration.
 #[derive(Clone, Default, Deserialize, SafeDebug, Serialize)]
