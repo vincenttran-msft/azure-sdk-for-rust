@@ -3,7 +3,7 @@
 
 use azure_core::{
     http::StatusCode,
-    time::{Duration, OffsetDateTime},
+    time::{parse_rfc3339, to_rfc3339, Duration, OffsetDateTime},
 };
 use azure_core_test::{recorded, TestContext};
 use azure_storage_blob::models::{
@@ -331,13 +331,12 @@ async fn test_container_access_policy(ctx: TestContext) -> Result<(), Box<dyn Er
     // Recording Setup
 
     use azure_core_test::VarOptions;
-    use time::format_description::well_known::Rfc3339;
     let recording = ctx.recording();
     let container_client = get_container_client(recording, false).await?;
     container_client.create_container(None).await?;
 
-    let expiry_time_str = (OffsetDateTime::now_utc() + Duration::seconds(10)).format(&Rfc3339)?;
-    let start_time_str = OffsetDateTime::now_utc().format(&Rfc3339)?;
+    let expiry_time_str = to_rfc3339(&(OffsetDateTime::now_utc() + Duration::seconds(10)));
+    let start_time_str = to_rfc3339(&OffsetDateTime::now_utc());
 
     let expiry_time = recording.var(
         "expiry_time",
@@ -356,9 +355,9 @@ async fn test_container_access_policy(ctx: TestContext) -> Result<(), Box<dyn Er
     );
 
     let access_policy = AccessPolicy {
-        expiry: Some(OffsetDateTime::parse(&expiry_time, &Rfc3339)?),
+        expiry: Some(parse_rfc3339(&expiry_time)?),
         permission: Some("rw".to_string()),
-        start: Some(OffsetDateTime::parse(&start_time, &Rfc3339)?),
+        start: Some(parse_rfc3339(&start_time)?),
     };
     let signed_identifier = SignedIdentifier {
         access_policy: Some(access_policy),
