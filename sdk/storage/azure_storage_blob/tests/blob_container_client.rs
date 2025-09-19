@@ -339,7 +339,7 @@ async fn test_container_access_policy(ctx: TestContext) -> Result<(), Box<dyn Er
     let expiry_time_str = (OffsetDateTime::now_utc() + Duration::seconds(10)).format(&Rfc3339)?;
     let start_time_str = OffsetDateTime::now_utc().format(&Rfc3339)?;
 
-    let expiry_time = recording.var_opt(
+    let expiry_time = recording.var(
         "expiry_time",
         Some(VarOptions {
             default_value: Some(expiry_time_str.clone().into()),
@@ -347,7 +347,7 @@ async fn test_container_access_policy(ctx: TestContext) -> Result<(), Box<dyn Er
         }),
     );
 
-    let start_time = recording.var_opt(
+    let start_time = recording.var(
         "start_time",
         Some(VarOptions {
             default_value: Some(start_time_str.clone().into()),
@@ -355,15 +355,10 @@ async fn test_container_access_policy(ctx: TestContext) -> Result<(), Box<dyn Er
         }),
     );
 
-    let expiry_time_datetime = OffsetDateTime::parse(&expiry_time.unwrap(), &Rfc3339)?;
-    let start_time_datetime = OffsetDateTime::parse(&start_time.unwrap(), &Rfc3339)?;
-    // let expiry_time_datetime = OffsetDateTime::parse(&expiry_time_str, &Rfc3339)?;
-    // let start_time_datetime = OffsetDateTime::parse(&start_time_str, &Rfc3339)?;
-
     let access_policy = AccessPolicy {
-        expiry: Some(expiry_time_datetime),
+        expiry: Some(OffsetDateTime::parse(&expiry_time, &Rfc3339)?),
         permission: Some("rw".to_string()),
-        start: Some(start_time_datetime),
+        start: Some(OffsetDateTime::parse(&start_time, &Rfc3339)?),
     };
     let signed_identifier = SignedIdentifier {
         access_policy: Some(access_policy),
