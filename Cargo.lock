@@ -232,6 +232,7 @@ dependencies = [
  "serde",
  "serde_amqp",
  "serde_bytes",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -328,7 +329,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "typespec_client_core",
  "url",
 ]
 

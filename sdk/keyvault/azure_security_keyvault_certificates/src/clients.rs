@@ -3,18 +3,18 @@
 
 pub use crate::generated::clients::*;
 use crate::models::{
-    CertificateClientBeginCreateCertificateOptions,
-    CertificateClientResumeCertificateOperationOptions, CertificateOperation,
-    CreateCertificateParameters,
+    CertificateClientCreateCertificateOptions, CertificateOperation, CreateCertificateParameters,
 };
 use azure_core::{
+    error::ErrorKind,
     http::{
         headers::{RETRY_AFTER, RETRY_AFTER_MS, X_MS_RETRY_AFTER_MS},
-        poller::{get_retry_after, PollerResult, PollerState, StatusMonitor as _},
-        poller::{Poller, PollerStatus},
+        poller::{
+            get_retry_after, Poller, PollerResult, PollerState, PollerStatus, StatusMonitor as _,
+        },
         Body, Method, RawResponse, Request, RequestContent, Url,
     },
-    json, Result,
+    json, tracing, Result,
 };
 
 impl CertificateClient {
@@ -63,26 +63,20 @@ impl CertificateClient {
     ///     ..Default::default()
     /// };
     ///
-    /// // Wait for the certificate operation to complete and get the last status monitor.
-    /// let operation = client
-    ///     .begin_create_certificate("certificate-name", body.try_into()?, None)?
-    ///     .wait()
+    /// // Wait for the certificate operation to complete and get the certificate.
+    /// let certificate = client
+    ///     .create_certificate("certificate-name", body.try_into()?, None)?
     ///     .await?
-    ///     // Deserialize the CertificateOperation:
     ///     .into_body()?;
-    ///
-    /// if matches!(operation.status, Some(status) if status == "completed") {
-    ///     let target = operation.target.ok_or("expected target")?;
-    ///     println!("Created certificate {}", target);
-    /// }
     ///
     /// # Ok(()) }
     /// ```
-    pub fn begin_create_certificate(
+    #[tracing::function("KeyVault.createCertificate")]
+    pub fn create_certificate(
         &self,
         certificate_name: &str,
         parameters: RequestContent<CreateCertificateParameters>,
-        options: Option<CertificateClientBeginCreateCertificateOptions<'_>>,
+        options: Option<CertificateClientCreateCertificateOptions<'_>>,
     ) -> Result<Poller<CertificateOperation>> {
         let options = options.unwrap_or_default().into_owned();
         let pipeline = self.pipeline.clone();
@@ -135,8 +129,9 @@ impl CertificateClient {
 
                 let ctx = options.method_options.context.clone();
                 let pipeline = pipeline.clone();
+                let api_version = api_version.clone();
                 async move {
-                    let rsp: RawResponse = pipeline.send(&ctx, &mut request, None).await?;
+                    let rsp = pipeline.send(&ctx, &mut request, None).await?;
                     let (status, headers, body) = rsp.deconstruct();
                     let retry_after = get_retry_after(
                         &headers,
@@ -152,109 +147,43 @@ impl CertificateClient {
                             retry_after,
                             next: next_link,
                         },
-                        _ => PollerResult::Done { response: rsp },
-                    })
-                }
-            },
-            None,
-        ))
-    }
+                        PollerStatus::Succeeded => {
+                            PollerResult::Succeeded {
+                                response: rsp,
+                                target: Box::new(move || {
+                                    Box::pin(async move {
+                                        let final_link: Url = res
+                                            .target
+                                            .ok_or_else(|| {
+                                                azure_core::Error::new(
+                                                    ErrorKind::Other,
+                                                    "missing target",
+                                                )
+                                            })?
+                                            .parse()?;
 
-    /// Resumes the [`CertificateClient::begin_create_certificate`] operation by returning a [`Poller<CertificateOperation>`] already in progress or completed.
-    ///
-    /// Gets the creation operation associated with a specified certificate. This operation requires the certificates/get permission.
-    ///
-    /// # Arguments
-    ///
-    /// * `certificate_name` - The name of the certificate.
-    /// * `options` - Optional parameters for the request.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use azure_identity::DeveloperToolsCredential;
-    /// use azure_security_keyvault_certificates::{
-    ///     CertificateClient,
-    ///     models::{CreateCertificateParameters, CertificatePolicy, X509CertificateProperties, IssuerParameters},
-    /// };
-    ///
-    /// # #[tokio::main] async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let credential = DeveloperToolsCredential::new(None)?;
-    /// let client = CertificateClient::new(
-    ///     "https://your-key-vault-name.vault.azure.net/",
-    ///     credential.clone(),
-    ///     None,
-    /// )?;
-    ///
-    /// // Create a self-signed certificate.
-    /// let policy = CertificatePolicy {
-    ///     x509_certificate_properties: Some(X509CertificateProperties {
-    ///         subject: Some("CN=DefaultPolicy".into()),
-    ///         ..Default::default()
-    ///     }),
-    ///     issuer_parameters: Some(IssuerParameters {
-    ///         name: Some("Self".into()),
-    ///         ..Default::default()
-    ///     }),
-    ///     ..Default::default()
-    /// };
-    /// let body = CreateCertificateParameters {
-    ///     certificate_policy: Some(policy),
-    ///     ..Default::default()
-    /// };
-    ///
-    /// // Wait for the certificate operation to complete and get the last status monitor.
-    /// let operation = client
-    ///     .resume_certificate_operation("certificate-name",  None)?
-    ///     .wait()
-    ///     .await?
-    ///     // Deserialize the CertificateOperation:
-    ///     .into_body()?;
-    ///
-    /// if matches!(operation.status, Some(status) if status == "completed") {
-    ///     let target = operation.target.ok_or("expected target")?;
-    ///     println!("Created certificate {}", target);
-    /// }
-    ///
-    /// # Ok(()) }
-    /// ```
-    pub fn resume_certificate_operation(
-        &self,
-        certificate_name: &str,
-        options: Option<CertificateClientResumeCertificateOperationOptions<'_>>,
-    ) -> Result<Poller<CertificateOperation>> {
-        let options = options.unwrap_or_default().into_owned();
-        let pipeline = self.pipeline.clone();
-        let mut url = self.endpoint.clone();
-        let mut path = String::from("certificates/{certificate-name}/pending");
-        path = path.replace("{certificate-name}", certificate_name);
-        url = url.join(&path)?;
-        url.query_pairs_mut()
-            .append_pair("api-version", &self.api_version);
-        Ok(Poller::from_callback(
-            move |_| {
-                let url = url.clone();
-                let mut request = Request::new(url.clone(), Method::Get);
-                request.insert_header("accept", "application/json");
-                let ctx = options.method_options.context.clone();
-                let pipeline = pipeline.clone();
-                async move {
-                    let rsp: RawResponse = pipeline.send(&ctx, &mut request, None).await?;
-                    let (status, headers, body) = rsp.deconstruct();
-                    let retry_after = get_retry_after(
-                        &headers,
-                        &[RETRY_AFTER_MS, X_MS_RETRY_AFTER_MS, RETRY_AFTER],
-                        &options.poller_options,
-                    );
-                    let res: CertificateOperation = json::from_json(&body)?;
-                    let rsp = RawResponse::from_bytes(status, headers, body).into();
+                                        // Make sure the `api-version` is set appropriately.
+                                        let qp = final_link
+                                            .query_pairs()
+                                            .filter(|(name, _)| name.ne("api-version"));
+                                        let mut final_link = final_link.clone();
+                                        final_link
+                                            .query_pairs_mut()
+                                            .clear()
+                                            .extend_pairs(qp)
+                                            .append_pair("api-version", &api_version);
 
-                    Ok(match res.status() {
-                        PollerStatus::InProgress => PollerResult::InProgress {
-                            response: rsp,
-                            retry_after,
-                            next: url,
-                        },
+                                        let mut request = Request::new(final_link, Method::Get);
+                                        request.insert_header("accept", "application/json");
+
+                                        let rsp: RawResponse =
+                                            pipeline.send(&ctx, &mut request, None).await?;
+                                        let (status, headers, body) = rsp.deconstruct();
+                                        Ok(RawResponse::from_bytes(status, headers, body).into())
+                                    })
+                                }),
+                            }
+                        }
                         _ => PollerResult::Done { response: rsp },
                     })
                 }
