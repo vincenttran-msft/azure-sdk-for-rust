@@ -17,25 +17,35 @@ use azure_core::{
     base64::option::{deserialize, serialize},
     fmt::SafeDebug,
     time::OffsetDateTime,
+    Value,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::HashMap;
 
 /// Represents an access policy.
 #[derive(Clone, Default, Deserialize, SafeDebug, Serialize)]
 pub struct AccessPolicy {
     /// The date-time the policy expires.
-    #[serde(rename = "Expiry", skip_serializing_if = "Option::is_none")]
-    pub expiry: Option<String>,
+    #[serde(
+        default,
+        rename = "Expiry",
+        skip_serializing_if = "Option::is_none",
+        with = "models_serde::option_offset_date_time_rfc3339"
+    )]
+    pub expiry: Option<OffsetDateTime>,
 
     /// The permissions for acl the policy.
     #[serde(rename = "Permission", skip_serializing_if = "Option::is_none")]
     pub permission: Option<String>,
 
     /// The date-time the policy is active.
-    #[serde(rename = "Start", skip_serializing_if = "Option::is_none")]
-    pub start: Option<String>,
+    #[serde(
+        default,
+        rename = "Start",
+        skip_serializing_if = "Option::is_none",
+        with = "models_serde::option_offset_date_time_rfc3339"
+    )]
+    pub start: Option<OffsetDateTime>,
 }
 
 /// Contains results for `AppendBlobClient::append_block_from_url()`
