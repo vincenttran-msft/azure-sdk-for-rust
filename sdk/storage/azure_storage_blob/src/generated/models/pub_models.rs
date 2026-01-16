@@ -13,6 +13,7 @@ use super::{
     ImmutabilityPolicyMode, LeaseDuration, LeaseState, LeaseStatus, PublicAccessType,
     QueryRequestType, QueryType, RehydratePriority,
 };
+use crate::models::BlobName;
 use azure_core::{
     base64::option::{deserialize, serialize},
     fmt::SafeDebug,
@@ -223,13 +224,8 @@ pub struct BlobItemInternal {
     pub metadata: Option<BlobMetadata>,
 
     /// The name of the blob.
-    #[serde(
-        rename = "Name",
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "crate::models::deserialize_blob_name",
-        default
-    )]
-    pub name: Option<String>,
+    #[serde(rename = "Name", skip_serializing_if = "Option::is_none")]
+    pub name: Option<BlobName>,
 
     /// The object replication metadata of the blob.
     #[serde(rename = "OrMetadata", skip_serializing_if = "Option::is_none")]
@@ -257,19 +253,6 @@ pub struct BlobMetadata {
 
     /// Whether the blob metadata is encrypted.
     pub encrypted: Option<String>,
-}
-
-/// Represents a blob name.
-#[derive(Clone, Default, Deserialize, SafeDebug, Serialize)]
-#[non_exhaustive]
-pub struct BlobName {
-    /// The blob name.
-    #[serde(rename = "$text", skip_serializing_if = "Option::is_none")]
-    pub content: Option<String>,
-
-    /// Whether the blob name is encoded.
-    #[serde(rename = "@Encoded", skip_serializing_if = "Option::is_none")]
-    pub encoded: Option<bool>,
 }
 
 /// Represents a blob prefix.
