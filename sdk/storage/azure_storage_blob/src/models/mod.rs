@@ -11,7 +11,7 @@ use serde::{de::Error, Deserialize, Deserializer, Serialize};
 #[derive(Clone, Default, Deserialize, SafeDebug, Serialize)]
 #[non_exhaustive]
 #[serde(rename = "Blob")]
-pub struct BlobItemInternalCustom {
+pub struct BlobItemInternal {
     /// The tags of the blob.
     #[serde(rename = "BlobTags", skip_serializing_if = "Option::is_none")]
     pub blob_tags: Option<BlobTags>,
@@ -136,7 +136,7 @@ pub use crate::generated::models::{
     BlobContainerClientRenewLeaseOptions, BlobContainerClientRenewLeaseResult,
     BlobContainerClientRenewLeaseResultHeaders, BlobContainerClientSetAccessPolicyOptions,
     BlobContainerClientSetMetadataOptions, BlobCopySourceTags, BlobDeleteType, BlobExpiryOptions,
-    BlobFlatListSegment, BlobItemInternal, BlobMetadata, BlobPropertiesInternal,
+    BlobFlatListSegment, BlobMetadata, BlobPropertiesInternal,
     BlobServiceClientFindBlobsByTagsOptions, BlobServiceClientGetAccountInfoOptions,
     BlobServiceClientGetAccountInfoResult, BlobServiceClientGetAccountInfoResultHeaders,
     BlobServiceClientGetPropertiesOptions, BlobServiceClientGetStatisticsOptions,

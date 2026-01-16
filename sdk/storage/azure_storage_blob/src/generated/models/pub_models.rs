@@ -13,7 +13,7 @@ use super::{
     ImmutabilityPolicyMode, LeaseDuration, LeaseState, LeaseStatus, PublicAccessType,
     QueryRequestType, QueryType, RehydratePriority,
 };
-use crate::models::BlobName;
+use crate::models::BlobItemInternal;
 use azure_core::{
     base64::option::{deserialize, serialize},
     fmt::SafeDebug,
@@ -198,61 +198,30 @@ pub struct BlobHierarchyListSegment {
     pub blob_prefixes: Option<Vec<BlobPrefix>>,
 }
 
-/// An Azure Storage Blob
-#[derive(Clone, Default, Deserialize, SafeDebug, Serialize)]
-#[non_exhaustive]
-#[serde(rename = "Blob")]
-pub struct BlobItemInternal {
-    /// The tags of the blob.
-    #[serde(rename = "BlobTags", skip_serializing_if = "Option::is_none")]
-    pub blob_tags: Option<BlobTags>,
-
-    /// Whether the blob is deleted.
-    #[serde(rename = "Deleted", skip_serializing_if = "Option::is_none")]
-    pub deleted: Option<bool>,
-
-    /// Whether the blob has versions only.
-    #[serde(rename = "HasVersionsOnly", skip_serializing_if = "Option::is_none")]
-    pub has_versions_only: Option<bool>,
-
-    /// Whether the blob is the current version.
-    #[serde(rename = "IsCurrentVersion", skip_serializing_if = "Option::is_none")]
-    pub is_current_version: Option<bool>,
-
-    /// The metadata of the blob.
-    #[serde(rename = "Metadata", skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<BlobMetadata>,
-
-    /// The name of the blob.
-    #[serde(rename = "Name", skip_serializing_if = "Option::is_none")]
-    pub name: Option<BlobName>,
-
-    /// The object replication metadata of the blob.
-    #[serde(rename = "OrMetadata", skip_serializing_if = "Option::is_none")]
-    pub object_replication_metadata: Option<ObjectReplicationMetadata>,
-
-    /// The properties of the blob.
-    #[serde(rename = "Properties", skip_serializing_if = "Option::is_none")]
-    pub properties: Option<BlobPropertiesInternal>,
-
-    /// The snapshot of the blob.
-    #[serde(rename = "Snapshot", skip_serializing_if = "Option::is_none")]
-    pub snapshot: Option<String>,
-
-    /// The version id of the blob.
-    #[serde(rename = "VersionId", skip_serializing_if = "Option::is_none")]
-    pub version_id: Option<String>,
-}
-
 /// The blob metadata.
-#[derive(Clone, Default, SafeDebug)]
+#[derive(Clone, Default, Deserialize, SafeDebug, Serialize)]
 #[non_exhaustive]
 pub struct BlobMetadata {
     /// contains unnamed additional properties
+    #[serde(flatten)]
     pub additional_properties: Option<HashMap<String, String>>,
 
     /// Whether the blob metadata is encrypted.
+    #[serde(rename = "@Encrypted", skip_serializing_if = "Option::is_none")]
     pub encrypted: Option<String>,
+}
+
+/// Represents a blob name.
+#[derive(Clone, Default, Deserialize, SafeDebug, Serialize)]
+#[non_exhaustive]
+pub struct BlobName {
+    /// The blob name.
+    #[serde(rename = "$text", skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+
+    /// Whether the blob name is encoded.
+    #[serde(rename = "@Encoded", skip_serializing_if = "Option::is_none")]
+    pub encoded: Option<bool>,
 }
 
 /// Represents a blob prefix.
@@ -1090,10 +1059,12 @@ pub struct Metrics {
 }
 
 /// The object replication metadata.
-#[derive(Clone, Default, SafeDebug)]
+#[derive(Clone, Default, Deserialize, SafeDebug, Serialize)]
 #[non_exhaustive]
+#[serde(rename = "OrMetadata")]
 pub struct ObjectReplicationMetadata {
     /// contains unnamed additional properties
+    #[serde(flatten)]
     pub additional_properties: Option<HashMap<String, String>>,
 }
 
