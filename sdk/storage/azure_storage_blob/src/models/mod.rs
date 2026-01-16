@@ -4,56 +4,83 @@
 pub(crate) mod content_range;
 mod extensions;
 
-use serde::{de::Error, Deserialize, Deserializer};
+use azure_core::fmt::SafeDebug;
+use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
 
-/// Deserializes a [`BlobName`] XML element directly into an `Option<String>`.
-///
-/// Use this with `#[serde(deserialize_with = "deserialize_blob_name")]` on fields
-/// that should be decoded from the `BlobName` XML structure into a plain `Option<String>`.
-///
-/// If the `Encoded` attribute is `true`, the content will be percent-decoded.
-/// Otherwise, the content is returned as-is.
-///
-/// # Errors
-///
-/// Returns a deserialization error if the content is percent-encoded but contains
-/// invalid UTF-8 sequences after decoding.
-///
-/// # Example
-///
-/// ```ignore
-/// #[derive(Deserialize)]
-/// struct MyStruct {
-///     #[serde(deserialize_with = "deserialize_blob_name")]
-///     name: Option<String>,
-/// }
-/// ```
-pub fn deserialize_blob_name<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let blob_name = Option::<BlobName>::deserialize(deserializer)?;
+/// Internal representation of a blob name as it appears in XML.
+#[derive(Clone, Default, Deserialize)]
+struct BlobNameXml {
+    /// The blob name content.
+    #[serde(rename = "$text")]
+    pub content: Option<String>,
 
-    let Some(blob_name) = blob_name else {
-        return Ok(None);
-    };
+    /// Whether the blob name is percent-encoded.
+    #[serde(rename = "@Encoded")]
+    pub encoded: Option<bool>,
+}
 
-    let Some(content) = blob_name.content else {
-        return Ok(None);
-    };
+/// A blob name that automatically handles percent-decoding during deserialization.
+///
+/// When deserializing from XML, if the `Encoded` attribute is `true`, the content
+/// will be percent-decoded. Otherwise, the content is returned as-is.
+///
+/// This type is used via `@@alternateType` in TypeSpec to replace the generated
+/// `BlobName` type, providing automatic decoding without needing `deserialize_with`.
+#[derive(Clone, Default, SafeDebug)]
+pub struct BlobName(pub Option<String>);
 
-    if blob_name.encoded.unwrap_or_default() {
-        use percent_encoding::percent_decode_str;
-        let decoded = percent_decode_str(&content)
-            .decode_utf8()
-            .map_err(D::Error::custom)?;
-        Ok(Some(decoded.into_owned()))
-    } else {
-        Ok(Some(content))
+impl BlobName {
+    /// Creates a new `BlobName` with the given content.
+    pub fn new(content: impl Into<String>) -> Self {
+        Self(Some(content.into()))
+    }
+
+    /// Returns the blob name as a string slice, if present.
+    pub fn as_str(&self) -> Option<&str> {
+        self.0.as_deref()
+    }
+
+    /// Consumes the `BlobName` and returns the inner `Option<String>`.
+    pub fn into_inner(self) -> Option<String> {
+        self.0
     }
 }
 
-use crate::generated::models::BlobName;
+impl<'de> Deserialize<'de> for BlobName {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let xml = Option::<BlobNameXml>::deserialize(deserializer)?;
+
+        let Some(xml) = xml else {
+            return Ok(BlobName(None));
+        };
+
+        let Some(content) = xml.content else {
+            return Ok(BlobName(None));
+        };
+
+        if xml.encoded.unwrap_or_default() {
+            use percent_encoding::percent_decode_str;
+            let decoded = percent_decode_str(&content)
+                .decode_utf8()
+                .map_err(D::Error::custom)?;
+            Ok(BlobName(Some(decoded.into_owned())))
+        } else {
+            Ok(BlobName(Some(content)))
+        }
+    }
+}
+
+impl Serialize for BlobName {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.0.serialize(serializer)
+    }
+}
 pub use crate::generated::models::{
     AccessPolicy, AccessTier, AccountKind, AppendBlobClientAppendBlockFromUrlOptions,
     AppendBlobClientAppendBlockFromUrlResult, AppendBlobClientAppendBlockFromUrlResultHeaders,
