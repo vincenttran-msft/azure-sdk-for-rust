@@ -6,9 +6,10 @@
 use crate::generated::{
     clients::QueueClient,
     models::{
-        ListQueuesResponse, QueueServiceClientGetPropertiesOptions,
-        QueueServiceClientGetStatisticsOptions, QueueServiceClientListQueuesOptions,
-        QueueServiceClientSetPropertiesOptions, QueueServiceProperties, QueueServiceStats,
+        KeyInfo, ListQueuesResponse, QueueServiceClientGetPropertiesOptions,
+        QueueServiceClientGetStatisticsOptions, QueueServiceClientGetUserDelegationKeyOptions,
+        QueueServiceClientListQueuesOptions, QueueServiceClientSetPropertiesOptions,
+        QueueServiceProperties, QueueServiceStats, UserDelegationKey,
     },
 };
 use azure_core::{
@@ -209,11 +210,101 @@ impl QueueServiceClient {
         Ok(rsp.into())
     }
 
+    /// Retrieves a user delegation key for the Queue service. This is only a valid operation when using bearer token authentication.
+    ///
+    /// # Arguments
+    ///
+    /// * `key_info` - Key information
+    /// * `options` - Optional parameters for the request.
+    ///
+    /// ## Response Headers
+    ///
+    /// The returned [`Response`](azure_core::http::Response) implements the [`UserDelegationKeyHeaders`] trait, which provides
+    /// access to response headers. For example:
+    ///
+    /// ```no_run
+    /// use azure_core::{Result, http::{Response, XmlFormat}};
+    /// use azure_storage_queue::models::{UserDelegationKey, UserDelegationKeyHeaders};
+    /// async fn example() -> Result<()> {
+    ///     let response: Response<UserDelegationKey, XmlFormat> = unimplemented!();
+    ///     // Access response headers
+    ///     if let Some(date) = response.date()? {
+    ///         println!("date: {:?}", date);
+    ///     }
+    ///     Ok(())
+    /// }
+    /// ```
+    ///
+    /// ### Available headers
+    /// * [`date`()](crate::generated::models::UserDelegationKeyHeaders::date) - date
+    ///
+    /// [`UserDelegationKeyHeaders`]: crate::generated::models::UserDelegationKeyHeaders
+    #[tracing::function("Storage.Queues.getUserDelegationKey")]
+    pub async fn get_user_delegation_key(
+        &self,
+        key_info: RequestContent<KeyInfo, XmlFormat>,
+        options: Option<QueueServiceClientGetUserDelegationKeyOptions<'_>>,
+    ) -> Result<Response<UserDelegationKey, XmlFormat>> {
+        let options = options.unwrap_or_default();
+        let ctx = options.method_options.context.to_borrowed();
+        let mut url = self.endpoint.clone();
+        let mut query_builder = url.query_builder();
+        query_builder
+            .append_pair("comp", "userdelegationkey")
+            .append_pair("restype", "service");
+        if let Some(timeout) = options.timeout {
+            query_builder.set_pair("timeout", timeout.to_string());
+        }
+        query_builder.build();
+        let mut request = Request::new(url, Method::Post);
+        request.insert_header("accept", "application/xml");
+        request.insert_header("content-type", "application/xml");
+        request.insert_header("x-ms-version", &self.version);
+        request.set_body(key_info);
+        let rsp = self
+            .pipeline
+            .send(
+                &ctx,
+                &mut request,
+                Some(PipelineSendOptions {
+                    check_success: CheckSuccessOptions {
+                        success_codes: &[200],
+                    },
+                    ..Default::default()
+                }),
+            )
+            .await?;
+        Ok(rsp.into())
+    }
+
     /// returns a list of the queues under the specified account
     ///
     /// # Arguments
     ///
     /// * `options` - Optional parameters for the request.
+    ///
+    /// ## Response Headers
+    ///
+    /// The returned [`Response`](azure_core::http::Response) implements the [`ListQueuesResponseHeaders`] trait, which provides
+    /// access to response headers. For example:
+    ///
+    /// ```no_run
+    /// use azure_core::{Result, http::{Response, XmlFormat}};
+    /// use azure_storage_queue::models::{ListQueuesResponse, ListQueuesResponseHeaders};
+    /// async fn example() -> Result<()> {
+    ///     let response: Response<ListQueuesResponse, XmlFormat> = unimplemented!();
+    ///     // Access response headers
+    ///     if let Some(date) = response.date()? {
+    ///         println!("date: {:?}", date);
+    ///     }
+    ///     Ok(())
+    /// }
+    /// ```
+    ///
+    /// ### Available headers
+    /// * [`date`()](crate::generated::models::ListQueuesResponseHeaders::date) - date
+    ///
+    /// [`ListQueuesResponseHeaders`]: crate::generated::models::ListQueuesResponseHeaders
     #[tracing::function("Storage.Queues.getQueues")]
     pub fn list_queues(
         &self,
@@ -339,7 +430,7 @@ impl Default for QueueServiceClientOptions {
     fn default() -> Self {
         Self {
             client_options: ClientOptions::default(),
-            version: String::from("2018-03-28"),
+            version: String::from("2026-04-06"),
         }
     }
 }

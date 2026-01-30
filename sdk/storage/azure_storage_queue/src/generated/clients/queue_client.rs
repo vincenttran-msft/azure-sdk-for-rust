@@ -5,12 +5,14 @@
 
 use crate::generated::models::{
     ListOfPeekedMessage, ListOfReceivedMessage, ListOfSentMessage, ListOfSignedIdentifier,
-    QueueClientClearOptions, QueueClientCreateOptions, QueueClientDeleteMessageOptions,
-    QueueClientDeleteOptions, QueueClientGetAccessPolicyOptions, QueueClientGetMetadataOptions,
-    QueueClientGetMetadataResult, QueueClientPeekMessagesOptions,
+    QueueClientClearOptions, QueueClientClearResult, QueueClientCreateOptions,
+    QueueClientCreateResult, QueueClientDeleteMessageOptions, QueueClientDeleteMessageResult,
+    QueueClientDeleteOptions, QueueClientDeleteResult, QueueClientGetAccessPolicyOptions,
+    QueueClientGetMetadataOptions, QueueClientGetMetadataResult, QueueClientPeekMessagesOptions,
     QueueClientReceiveMessagesOptions, QueueClientSendMessageOptions,
     QueueClientSetAccessPolicyOptions, QueueClientSetAccessPolicyResult,
-    QueueClientSetMetadataOptions, QueueClientUpdateOptions, QueueMessage,
+    QueueClientSetMetadataOptions, QueueClientSetMetadataResult, QueueClientUpdateOptions,
+    QueueClientUpdateResult, QueueMessage,
 };
 use azure_core::{
     credentials::TokenCredential,
@@ -96,17 +98,45 @@ impl QueueClient {
     /// # Arguments
     ///
     /// * `options` - Optional parameters for the request.
+    ///
+    /// ## Response Headers
+    ///
+    /// The returned [`Response`](azure_core::http::Response) implements the [`QueueClientClearResultHeaders`] trait, which provides
+    /// access to response headers. For example:
+    ///
+    /// ```no_run
+    /// use azure_core::{Result, http::{Response, NoFormat}};
+    /// use azure_storage_queue::models::{QueueClientClearResult, QueueClientClearResultHeaders};
+    /// async fn example() -> Result<()> {
+    ///     let response: Response<QueueClientClearResult, NoFormat> = unimplemented!();
+    ///     // Access response headers
+    ///     if let Some(date) = response.date()? {
+    ///         println!("date: {:?}", date);
+    ///     }
+    ///     Ok(())
+    /// }
+    /// ```
+    ///
+    /// ### Available headers
+    /// * [`date`()](crate::generated::models::QueueClientClearResultHeaders::date) - date
+    ///
+    /// [`QueueClientClearResultHeaders`]: crate::generated::models::QueueClientClearResultHeaders
     #[tracing::function("Storage.Queues.Queue.clear")]
     pub async fn clear(
         &self,
         options: Option<QueueClientClearOptions<'_>>,
-    ) -> Result<Response<(), NoFormat>> {
+    ) -> Result<Response<QueueClientClearResult, NoFormat>> {
         let options = options.unwrap_or_default();
         let ctx = options.method_options.context.to_borrowed();
         let mut url = self.endpoint.clone();
         let mut path = String::from("/{queueName}/messages");
         path = path.replace("{queueName}", &self.queue_name);
         url.append_path(&path);
+        let mut query_builder = url.query_builder();
+        if let Some(timeout) = options.timeout {
+            query_builder.set_pair("timeout", timeout.to_string());
+        }
+        query_builder.build();
         let mut request = Request::new(url, Method::Delete);
         request.insert_header("x-ms-version", &self.version);
         let rsp = self
@@ -130,11 +160,34 @@ impl QueueClient {
     /// # Arguments
     ///
     /// * `options` - Optional parameters for the request.
+    ///
+    /// ## Response Headers
+    ///
+    /// The returned [`Response`](azure_core::http::Response) implements the [`QueueClientCreateResultHeaders`] trait, which provides
+    /// access to response headers. For example:
+    ///
+    /// ```no_run
+    /// use azure_core::{Result, http::{Response, NoFormat}};
+    /// use azure_storage_queue::models::{QueueClientCreateResult, QueueClientCreateResultHeaders};
+    /// async fn example() -> Result<()> {
+    ///     let response: Response<QueueClientCreateResult, NoFormat> = unimplemented!();
+    ///     // Access response headers
+    ///     if let Some(date) = response.date()? {
+    ///         println!("date: {:?}", date);
+    ///     }
+    ///     Ok(())
+    /// }
+    /// ```
+    ///
+    /// ### Available headers
+    /// * [`date`()](crate::generated::models::QueueClientCreateResultHeaders::date) - date
+    ///
+    /// [`QueueClientCreateResultHeaders`]: crate::generated::models::QueueClientCreateResultHeaders
     #[tracing::function("Storage.Queues.Queue.create")]
     pub async fn create(
         &self,
         options: Option<QueueClientCreateOptions<'_>>,
-    ) -> Result<Response<(), NoFormat>> {
+    ) -> Result<Response<QueueClientCreateResult, NoFormat>> {
         let options = options.unwrap_or_default();
         let ctx = options.method_options.context.to_borrowed();
         let mut url = self.endpoint.clone();
@@ -174,11 +227,34 @@ impl QueueClient {
     /// # Arguments
     ///
     /// * `options` - Optional parameters for the request.
+    ///
+    /// ## Response Headers
+    ///
+    /// The returned [`Response`](azure_core::http::Response) implements the [`QueueClientDeleteResultHeaders`] trait, which provides
+    /// access to response headers. For example:
+    ///
+    /// ```no_run
+    /// use azure_core::{Result, http::{Response, NoFormat}};
+    /// use azure_storage_queue::models::{QueueClientDeleteResult, QueueClientDeleteResultHeaders};
+    /// async fn example() -> Result<()> {
+    ///     let response: Response<QueueClientDeleteResult, NoFormat> = unimplemented!();
+    ///     // Access response headers
+    ///     if let Some(date) = response.date()? {
+    ///         println!("date: {:?}", date);
+    ///     }
+    ///     Ok(())
+    /// }
+    /// ```
+    ///
+    /// ### Available headers
+    /// * [`date`()](crate::generated::models::QueueClientDeleteResultHeaders::date) - date
+    ///
+    /// [`QueueClientDeleteResultHeaders`]: crate::generated::models::QueueClientDeleteResultHeaders
     #[tracing::function("Storage.Queues.Queue.delete")]
     pub async fn delete(
         &self,
         options: Option<QueueClientDeleteOptions<'_>>,
-    ) -> Result<Response<(), NoFormat>> {
+    ) -> Result<Response<QueueClientDeleteResult, NoFormat>> {
         let options = options.unwrap_or_default();
         let ctx = options.method_options.context.to_borrowed();
         let mut url = self.endpoint.clone();
@@ -191,11 +267,6 @@ impl QueueClient {
         }
         query_builder.build();
         let mut request = Request::new(url, Method::Delete);
-        if let Some(metadata) = options.metadata.as_ref() {
-            for (k, v) in metadata {
-                request.insert_header(format!("x-ms-meta-{k}"), v);
-            }
-        }
         request.insert_header("x-ms-version", &self.version);
         let rsp = self
             .pipeline
@@ -221,13 +292,36 @@ impl QueueClient {
     /// * `pop_receipt` - Required. Specifies the valid pop receipt value returned from an earlier call to the Get Messages or
     ///   Update Message operation.
     /// * `options` - Optional parameters for the request.
+    ///
+    /// ## Response Headers
+    ///
+    /// The returned [`Response`](azure_core::http::Response) implements the [`QueueClientDeleteMessageResultHeaders`] trait, which provides
+    /// access to response headers. For example:
+    ///
+    /// ```no_run
+    /// use azure_core::{Result, http::{Response, NoFormat}};
+    /// use azure_storage_queue::models::{QueueClientDeleteMessageResult, QueueClientDeleteMessageResultHeaders};
+    /// async fn example() -> Result<()> {
+    ///     let response: Response<QueueClientDeleteMessageResult, NoFormat> = unimplemented!();
+    ///     // Access response headers
+    ///     if let Some(date) = response.date()? {
+    ///         println!("date: {:?}", date);
+    ///     }
+    ///     Ok(())
+    /// }
+    /// ```
+    ///
+    /// ### Available headers
+    /// * [`date`()](crate::generated::models::QueueClientDeleteMessageResultHeaders::date) - date
+    ///
+    /// [`QueueClientDeleteMessageResultHeaders`]: crate::generated::models::QueueClientDeleteMessageResultHeaders
     #[tracing::function("Storage.Queues.Queue.deleteMessage")]
     pub async fn delete_message(
         &self,
         message_id: &str,
         pop_receipt: &str,
         options: Option<QueueClientDeleteMessageOptions<'_>>,
-    ) -> Result<Response<(), NoFormat>> {
+    ) -> Result<Response<QueueClientDeleteMessageResult, NoFormat>> {
         if message_id.is_empty() {
             return Err(azure_core::Error::with_message(
                 azure_core::error::ErrorKind::Other,
@@ -243,6 +337,9 @@ impl QueueClient {
         url.append_path(&path);
         let mut query_builder = url.query_builder();
         query_builder.set_pair("popReceipt", pop_receipt);
+        if let Some(timeout) = options.timeout {
+            query_builder.set_pair("timeout", timeout.to_string());
+        }
         query_builder.build();
         let mut request = Request::new(url, Method::Delete);
         request.insert_header("x-ms-version", &self.version);
@@ -298,7 +395,7 @@ impl QueueClient {
         let options = options.unwrap_or_default();
         let ctx = options.method_options.context.to_borrowed();
         let mut url = self.endpoint.clone();
-        let mut path = String::from("/{queueName}/");
+        let mut path = String::from("/{queueName}");
         path = path.replace("{queueName}", &self.queue_name);
         url.append_path(&path);
         let mut query_builder = url.query_builder();
@@ -344,12 +441,20 @@ impl QueueClient {
     /// async fn example() -> Result<()> {
     ///     let response: Response<QueueClientGetMetadataResult, NoFormat> = unimplemented!();
     ///     // Access response headers
+    ///     if let Some(date) = response.date()? {
+    ///         println!("date: {:?}", date);
+    ///     }
+    ///     if let Some(approximate_messages_count) = response.approximate_messages_count()? {
+    ///         println!("x-ms-approximate-messages-count: {:?}", approximate_messages_count);
+    ///     }
     ///     println!("x-ms-meta: {:?}", response.metadata()?);
     ///     Ok(())
     /// }
     /// ```
     ///
     /// ### Available headers
+    /// * [`date`()](crate::generated::models::QueueClientGetMetadataResultHeaders::date) - date
+    /// * [`approximate_messages_count`()](crate::generated::models::QueueClientGetMetadataResultHeaders::approximate_messages_count) - x-ms-approximate-messages-count
     /// * [`metadata`()](crate::generated::models::QueueClientGetMetadataResultHeaders::metadata) - x-ms-meta
     ///
     /// [`QueueClientGetMetadataResultHeaders`]: crate::generated::models::QueueClientGetMetadataResultHeaders
@@ -361,7 +466,7 @@ impl QueueClient {
         let options = options.unwrap_or_default();
         let ctx = options.method_options.context.to_borrowed();
         let mut url = self.endpoint.clone();
-        let mut path = String::from("/{queueName}/");
+        let mut path = String::from("/{queueName}");
         path = path.replace("{queueName}", &self.queue_name);
         url.append_path(&path);
         let mut query_builder = url.query_builder();
@@ -394,6 +499,29 @@ impl QueueClient {
     /// # Arguments
     ///
     /// * `options` - Optional parameters for the request.
+    ///
+    /// ## Response Headers
+    ///
+    /// The returned [`Response`](azure_core::http::Response) implements the [`ListOfPeekedMessageHeaders`] trait, which provides
+    /// access to response headers. For example:
+    ///
+    /// ```no_run
+    /// use azure_core::{Result, http::{Response, XmlFormat}};
+    /// use azure_storage_queue::models::{ListOfPeekedMessage, ListOfPeekedMessageHeaders};
+    /// async fn example() -> Result<()> {
+    ///     let response: Response<ListOfPeekedMessage, XmlFormat> = unimplemented!();
+    ///     // Access response headers
+    ///     if let Some(date) = response.date()? {
+    ///         println!("date: {:?}", date);
+    ///     }
+    ///     Ok(())
+    /// }
+    /// ```
+    ///
+    /// ### Available headers
+    /// * [`date`()](crate::generated::models::ListOfPeekedMessageHeaders::date) - date
+    ///
+    /// [`ListOfPeekedMessageHeaders`]: crate::generated::models::ListOfPeekedMessageHeaders
     #[tracing::function("Storage.Queues.Queue.peekMessages")]
     pub async fn peek_messages(
         &self,
@@ -409,6 +537,9 @@ impl QueueClient {
         query_builder.append_pair("peekonly", "true");
         if let Some(number_of_messages) = options.number_of_messages {
             query_builder.set_pair("numofmessages", number_of_messages.to_string());
+        }
+        if let Some(timeout) = options.timeout {
+            query_builder.set_pair("timeout", timeout.to_string());
         }
         query_builder.build();
         let mut request = Request::new(url, Method::Get);
@@ -437,6 +568,29 @@ impl QueueClient {
     /// # Arguments
     ///
     /// * `options` - Optional parameters for the request.
+    ///
+    /// ## Response Headers
+    ///
+    /// The returned [`Response`](azure_core::http::Response) implements the [`ListOfReceivedMessageHeaders`] trait, which provides
+    /// access to response headers. For example:
+    ///
+    /// ```no_run
+    /// use azure_core::{Result, http::{Response, XmlFormat}};
+    /// use azure_storage_queue::models::{ListOfReceivedMessage, ListOfReceivedMessageHeaders};
+    /// async fn example() -> Result<()> {
+    ///     let response: Response<ListOfReceivedMessage, XmlFormat> = unimplemented!();
+    ///     // Access response headers
+    ///     if let Some(date) = response.date()? {
+    ///         println!("date: {:?}", date);
+    ///     }
+    ///     Ok(())
+    /// }
+    /// ```
+    ///
+    /// ### Available headers
+    /// * [`date`()](crate::generated::models::ListOfReceivedMessageHeaders::date) - date
+    ///
+    /// [`ListOfReceivedMessageHeaders`]: crate::generated::models::ListOfReceivedMessageHeaders
     #[tracing::function("Storage.Queues.Queue.receiveMessages")]
     pub async fn receive_messages(
         &self,
@@ -490,6 +644,29 @@ impl QueueClient {
     ///
     /// * `queue_message` - A Message object which can be stored in a Queue
     /// * `options` - Optional parameters for the request.
+    ///
+    /// ## Response Headers
+    ///
+    /// The returned [`Response`](azure_core::http::Response) implements the [`ListOfSentMessageHeaders`] trait, which provides
+    /// access to response headers. For example:
+    ///
+    /// ```no_run
+    /// use azure_core::{Result, http::{Response, XmlFormat}};
+    /// use azure_storage_queue::models::{ListOfSentMessage, ListOfSentMessageHeaders};
+    /// async fn example() -> Result<()> {
+    ///     let response: Response<ListOfSentMessage, XmlFormat> = unimplemented!();
+    ///     // Access response headers
+    ///     if let Some(date) = response.date()? {
+    ///         println!("date: {:?}", date);
+    ///     }
+    ///     Ok(())
+    /// }
+    /// ```
+    ///
+    /// ### Available headers
+    /// * [`date`()](crate::generated::models::ListOfSentMessageHeaders::date) - date
+    ///
+    /// [`ListOfSentMessageHeaders`]: crate::generated::models::ListOfSentMessageHeaders
     #[tracing::function("Storage.Queues.Queue.sendMessage")]
     pub async fn send_message(
         &self,
@@ -505,6 +682,9 @@ impl QueueClient {
         let mut query_builder = url.query_builder();
         if let Some(message_time_to_live) = options.message_time_to_live {
             query_builder.set_pair("messageTtl", message_time_to_live.to_string());
+        }
+        if let Some(timeout) = options.timeout {
+            query_builder.set_pair("timeout", timeout.to_string());
         }
         if let Some(visibility_timeout) = options.visibility_timeout {
             query_builder.set_pair("visibilityTimeout", visibility_timeout.to_string());
@@ -569,7 +749,7 @@ impl QueueClient {
         let options = options.unwrap_or_default();
         let ctx = options.method_options.context.to_borrowed();
         let mut url = self.endpoint.clone();
-        let mut path = String::from("/{queueName}/");
+        let mut path = String::from("/{queueName}");
         path = path.replace("{queueName}", &self.queue_name);
         url.append_path(&path);
         let mut query_builder = url.query_builder();
@@ -604,16 +784,39 @@ impl QueueClient {
     ///
     /// * `metadata` - The metadata headers.
     /// * `options` - Optional parameters for the request.
+    ///
+    /// ## Response Headers
+    ///
+    /// The returned [`Response`](azure_core::http::Response) implements the [`QueueClientSetMetadataResultHeaders`] trait, which provides
+    /// access to response headers. For example:
+    ///
+    /// ```no_run
+    /// use azure_core::{Result, http::{Response, NoFormat}};
+    /// use azure_storage_queue::models::{QueueClientSetMetadataResult, QueueClientSetMetadataResultHeaders};
+    /// async fn example() -> Result<()> {
+    ///     let response: Response<QueueClientSetMetadataResult, NoFormat> = unimplemented!();
+    ///     // Access response headers
+    ///     if let Some(date) = response.date()? {
+    ///         println!("date: {:?}", date);
+    ///     }
+    ///     Ok(())
+    /// }
+    /// ```
+    ///
+    /// ### Available headers
+    /// * [`date`()](crate::generated::models::QueueClientSetMetadataResultHeaders::date) - date
+    ///
+    /// [`QueueClientSetMetadataResultHeaders`]: crate::generated::models::QueueClientSetMetadataResultHeaders
     #[tracing::function("Storage.Queues.Queue.setMetadata")]
     pub async fn set_metadata(
         &self,
         metadata: &HashMap<String, String>,
         options: Option<QueueClientSetMetadataOptions<'_>>,
-    ) -> Result<Response<(), NoFormat>> {
+    ) -> Result<Response<QueueClientSetMetadataResult, NoFormat>> {
         let options = options.unwrap_or_default();
         let ctx = options.method_options.context.to_borrowed();
         let mut url = self.endpoint.clone();
-        let mut path = String::from("/{queueName}/");
+        let mut path = String::from("/{queueName}");
         path = path.replace("{queueName}", &self.queue_name);
         url.append_path(&path);
         let mut query_builder = url.query_builder();
@@ -659,6 +862,37 @@ impl QueueClient {
     ///   larger than 2 hours on REST protocol versions prior to version 2011-08-18. The visibility timeout of a message can be
     ///   set to a value later than the expiry time.
     /// * `options` - Optional parameters for the request.
+    ///
+    /// ## Response Headers
+    ///
+    /// The returned [`Response`](azure_core::http::Response) implements the [`QueueClientUpdateResultHeaders`] trait, which provides
+    /// access to response headers. For example:
+    ///
+    /// ```no_run
+    /// use azure_core::{Result, http::{Response, NoFormat}};
+    /// use azure_storage_queue::models::{QueueClientUpdateResult, QueueClientUpdateResultHeaders};
+    /// async fn example() -> Result<()> {
+    ///     let response: Response<QueueClientUpdateResult, NoFormat> = unimplemented!();
+    ///     // Access response headers
+    ///     if let Some(date) = response.date()? {
+    ///         println!("date: {:?}", date);
+    ///     }
+    ///     if let Some(pop_receipt) = response.pop_receipt()? {
+    ///         println!("x-ms-popreceipt: {:?}", pop_receipt);
+    ///     }
+    ///     if let Some(time_next_visible) = response.time_next_visible()? {
+    ///         println!("x-ms-time-next-visible: {:?}", time_next_visible);
+    ///     }
+    ///     Ok(())
+    /// }
+    /// ```
+    ///
+    /// ### Available headers
+    /// * [`date`()](crate::generated::models::QueueClientUpdateResultHeaders::date) - date
+    /// * [`pop_receipt`()](crate::generated::models::QueueClientUpdateResultHeaders::pop_receipt) - x-ms-popreceipt
+    /// * [`time_next_visible`()](crate::generated::models::QueueClientUpdateResultHeaders::time_next_visible) - x-ms-time-next-visible
+    ///
+    /// [`QueueClientUpdateResultHeaders`]: crate::generated::models::QueueClientUpdateResultHeaders
     #[tracing::function("Storage.Queues.Queue.update")]
     pub async fn update(
         &self,
@@ -666,7 +900,7 @@ impl QueueClient {
         pop_receipt: &str,
         visibility_timeout: i32,
         options: Option<QueueClientUpdateOptions<'_>>,
-    ) -> Result<Response<(), NoFormat>> {
+    ) -> Result<Response<QueueClientUpdateResult, NoFormat>> {
         if message_id.is_empty() {
             return Err(azure_core::Error::with_message(
                 azure_core::error::ErrorKind::Other,
@@ -682,6 +916,9 @@ impl QueueClient {
         url.append_path(&path);
         let mut query_builder = url.query_builder();
         query_builder.set_pair("popReceipt", pop_receipt);
+        if let Some(timeout) = options.timeout {
+            query_builder.set_pair("timeout", timeout.to_string());
+        }
         query_builder.set_pair("visibilityTimeout", visibility_timeout.to_string());
         query_builder.build();
         let mut request = Request::new(url, Method::Put);
@@ -711,7 +948,7 @@ impl Default for QueueClientOptions {
     fn default() -> Self {
         Self {
             client_options: ClientOptions::default(),
-            version: String::from("2018-03-28"),
+            version: String::from("2026-04-06"),
         }
     }
 }
