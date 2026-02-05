@@ -9,8 +9,8 @@ use crate::generated::models::{
     QueueClientDeleteOptions, QueueClientGetAccessPolicyOptions, QueueClientGetMetadataOptions,
     QueueClientGetMetadataResult, QueueClientPeekMessagesOptions,
     QueueClientReceiveMessagesOptions, QueueClientSendMessageOptions,
-    QueueClientSetAccessPolicyOptions, QueueClientSetAccessPolicyResult,
-    QueueClientSetMetadataOptions, QueueClientUpdateOptions, QueueMessage,
+    QueueClientSetAccessPolicyOptions, QueueClientSetMetadataOptions, QueueClientUpdateOptions,
+    QueueClientUpdateResult, QueueMessage,
 };
 use azure_core::{
     credentials::TokenCredential,
@@ -107,6 +107,11 @@ impl QueueClient {
         let mut path = String::from("/{queueName}/messages");
         path = path.replace("{queueName}", &self.queue_name);
         url.append_path(&path);
+        let mut query_builder = url.query_builder();
+        if let Some(timeout) = options.timeout {
+            query_builder.set_pair("timeout", timeout.to_string());
+        }
+        query_builder.build();
         let mut request = Request::new(url, Method::Delete);
         request.insert_header("x-ms-version", &self.version);
         let rsp = self
@@ -191,11 +196,6 @@ impl QueueClient {
         }
         query_builder.build();
         let mut request = Request::new(url, Method::Delete);
-        if let Some(metadata) = options.metadata.as_ref() {
-            for (k, v) in metadata {
-                request.insert_header(format!("x-ms-meta-{k}"), v);
-            }
-        }
         request.insert_header("x-ms-version", &self.version);
         let rsp = self
             .pipeline
@@ -243,6 +243,9 @@ impl QueueClient {
         url.append_path(&path);
         let mut query_builder = url.query_builder();
         query_builder.set_pair("popReceipt", pop_receipt);
+        if let Some(timeout) = options.timeout {
+            query_builder.set_pair("timeout", timeout.to_string());
+        }
         query_builder.build();
         let mut request = Request::new(url, Method::Delete);
         request.insert_header("x-ms-version", &self.version);
@@ -267,29 +270,6 @@ impl QueueClient {
     /// # Arguments
     ///
     /// * `options` - Optional parameters for the request.
-    ///
-    /// ## Response Headers
-    ///
-    /// The returned [`Response`](azure_core::http::Response) implements the [`ListOfSignedIdentifierHeaders`] trait, which provides
-    /// access to response headers. For example:
-    ///
-    /// ```no_run
-    /// use azure_core::{Result, http::{Response, XmlFormat}};
-    /// use azure_storage_queue::models::{ListOfSignedIdentifier, ListOfSignedIdentifierHeaders};
-    /// async fn example() -> Result<()> {
-    ///     let response: Response<ListOfSignedIdentifier, XmlFormat> = unimplemented!();
-    ///     // Access response headers
-    ///     if let Some(date) = response.date()? {
-    ///         println!("date: {:?}", date);
-    ///     }
-    ///     Ok(())
-    /// }
-    /// ```
-    ///
-    /// ### Available headers
-    /// * [`date`()](crate::generated::models::ListOfSignedIdentifierHeaders::date) - date
-    ///
-    /// [`ListOfSignedIdentifierHeaders`]: crate::generated::models::ListOfSignedIdentifierHeaders
     #[tracing::function("Storage.Queues.Queue.getAccessPolicy")]
     pub async fn get_access_policy(
         &self,
@@ -298,7 +278,7 @@ impl QueueClient {
         let options = options.unwrap_or_default();
         let ctx = options.method_options.context.to_borrowed();
         let mut url = self.endpoint.clone();
-        let mut path = String::from("/{queueName}/");
+        let mut path = String::from("/{queueName}");
         path = path.replace("{queueName}", &self.queue_name);
         url.append_path(&path);
         let mut query_builder = url.query_builder();
@@ -344,12 +324,16 @@ impl QueueClient {
     /// async fn example() -> Result<()> {
     ///     let response: Response<QueueClientGetMetadataResult, NoFormat> = unimplemented!();
     ///     // Access response headers
+    ///     if let Some(approximate_messages_count) = response.approximate_messages_count()? {
+    ///         println!("x-ms-approximate-messages-count: {:?}", approximate_messages_count);
+    ///     }
     ///     println!("x-ms-meta: {:?}", response.metadata()?);
     ///     Ok(())
     /// }
     /// ```
     ///
     /// ### Available headers
+    /// * [`approximate_messages_count`()](crate::generated::models::QueueClientGetMetadataResultHeaders::approximate_messages_count) - x-ms-approximate-messages-count
     /// * [`metadata`()](crate::generated::models::QueueClientGetMetadataResultHeaders::metadata) - x-ms-meta
     ///
     /// [`QueueClientGetMetadataResultHeaders`]: crate::generated::models::QueueClientGetMetadataResultHeaders
@@ -361,7 +345,7 @@ impl QueueClient {
         let options = options.unwrap_or_default();
         let ctx = options.method_options.context.to_borrowed();
         let mut url = self.endpoint.clone();
-        let mut path = String::from("/{queueName}/");
+        let mut path = String::from("/{queueName}");
         path = path.replace("{queueName}", &self.queue_name);
         url.append_path(&path);
         let mut query_builder = url.query_builder();
@@ -409,6 +393,9 @@ impl QueueClient {
         query_builder.append_pair("peekonly", "true");
         if let Some(number_of_messages) = options.number_of_messages {
             query_builder.set_pair("numofmessages", number_of_messages.to_string());
+        }
+        if let Some(timeout) = options.timeout {
+            query_builder.set_pair("timeout", timeout.to_string());
         }
         query_builder.build();
         let mut request = Request::new(url, Method::Get);
@@ -506,6 +493,9 @@ impl QueueClient {
         if let Some(message_time_to_live) = options.message_time_to_live {
             query_builder.set_pair("messageTtl", message_time_to_live.to_string());
         }
+        if let Some(timeout) = options.timeout {
+            query_builder.set_pair("timeout", timeout.to_string());
+        }
         if let Some(visibility_timeout) = options.visibility_timeout {
             query_builder.set_pair("visibilityTimeout", visibility_timeout.to_string());
         }
@@ -537,39 +527,16 @@ impl QueueClient {
     ///
     /// * `queue_acl` - The access control list for the queue.
     /// * `options` - Optional parameters for the request.
-    ///
-    /// ## Response Headers
-    ///
-    /// The returned [`Response`](azure_core::http::Response) implements the [`QueueClientSetAccessPolicyResultHeaders`] trait, which provides
-    /// access to response headers. For example:
-    ///
-    /// ```no_run
-    /// use azure_core::{Result, http::{Response, NoFormat}};
-    /// use azure_storage_queue::models::{QueueClientSetAccessPolicyResult, QueueClientSetAccessPolicyResultHeaders};
-    /// async fn example() -> Result<()> {
-    ///     let response: Response<QueueClientSetAccessPolicyResult, NoFormat> = unimplemented!();
-    ///     // Access response headers
-    ///     if let Some(date) = response.date()? {
-    ///         println!("date: {:?}", date);
-    ///     }
-    ///     Ok(())
-    /// }
-    /// ```
-    ///
-    /// ### Available headers
-    /// * [`date`()](crate::generated::models::QueueClientSetAccessPolicyResultHeaders::date) - date
-    ///
-    /// [`QueueClientSetAccessPolicyResultHeaders`]: crate::generated::models::QueueClientSetAccessPolicyResultHeaders
     #[tracing::function("Storage.Queues.Queue.setAccessPolicy")]
     pub async fn set_access_policy(
         &self,
         queue_acl: RequestContent<ListOfSignedIdentifier, XmlFormat>,
         options: Option<QueueClientSetAccessPolicyOptions<'_>>,
-    ) -> Result<Response<QueueClientSetAccessPolicyResult, NoFormat>> {
+    ) -> Result<Response<(), NoFormat>> {
         let options = options.unwrap_or_default();
         let ctx = options.method_options.context.to_borrowed();
         let mut url = self.endpoint.clone();
-        let mut path = String::from("/{queueName}/");
+        let mut path = String::from("/{queueName}");
         path = path.replace("{queueName}", &self.queue_name);
         url.append_path(&path);
         let mut query_builder = url.query_builder();
@@ -613,7 +580,7 @@ impl QueueClient {
         let options = options.unwrap_or_default();
         let ctx = options.method_options.context.to_borrowed();
         let mut url = self.endpoint.clone();
-        let mut path = String::from("/{queueName}/");
+        let mut path = String::from("/{queueName}");
         path = path.replace("{queueName}", &self.queue_name);
         url.append_path(&path);
         let mut query_builder = url.query_builder();
@@ -659,6 +626,33 @@ impl QueueClient {
     ///   larger than 2 hours on REST protocol versions prior to version 2011-08-18. The visibility timeout of a message can be
     ///   set to a value later than the expiry time.
     /// * `options` - Optional parameters for the request.
+    ///
+    /// ## Response Headers
+    ///
+    /// The returned [`Response`](azure_core::http::Response) implements the [`QueueClientUpdateResultHeaders`] trait, which provides
+    /// access to response headers. For example:
+    ///
+    /// ```no_run
+    /// use azure_core::{Result, http::{Response, NoFormat}};
+    /// use azure_storage_queue::models::{QueueClientUpdateResult, QueueClientUpdateResultHeaders};
+    /// async fn example() -> Result<()> {
+    ///     let response: Response<QueueClientUpdateResult, NoFormat> = unimplemented!();
+    ///     // Access response headers
+    ///     if let Some(pop_receipt) = response.pop_receipt()? {
+    ///         println!("x-ms-popreceipt: {:?}", pop_receipt);
+    ///     }
+    ///     if let Some(time_next_visible) = response.time_next_visible()? {
+    ///         println!("x-ms-time-next-visible: {:?}", time_next_visible);
+    ///     }
+    ///     Ok(())
+    /// }
+    /// ```
+    ///
+    /// ### Available headers
+    /// * [`pop_receipt`()](crate::generated::models::QueueClientUpdateResultHeaders::pop_receipt) - x-ms-popreceipt
+    /// * [`time_next_visible`()](crate::generated::models::QueueClientUpdateResultHeaders::time_next_visible) - x-ms-time-next-visible
+    ///
+    /// [`QueueClientUpdateResultHeaders`]: crate::generated::models::QueueClientUpdateResultHeaders
     #[tracing::function("Storage.Queues.Queue.update")]
     pub async fn update(
         &self,
@@ -666,7 +660,7 @@ impl QueueClient {
         pop_receipt: &str,
         visibility_timeout: i32,
         options: Option<QueueClientUpdateOptions<'_>>,
-    ) -> Result<Response<(), NoFormat>> {
+    ) -> Result<Response<QueueClientUpdateResult, NoFormat>> {
         if message_id.is_empty() {
             return Err(azure_core::Error::with_message(
                 azure_core::error::ErrorKind::Other,
@@ -682,6 +676,9 @@ impl QueueClient {
         url.append_path(&path);
         let mut query_builder = url.query_builder();
         query_builder.set_pair("popReceipt", pop_receipt);
+        if let Some(timeout) = options.timeout {
+            query_builder.set_pair("timeout", timeout.to_string());
+        }
         query_builder.set_pair("visibilityTimeout", visibility_timeout.to_string());
         query_builder.build();
         let mut request = Request::new(url, Method::Put);
@@ -711,7 +708,7 @@ impl Default for QueueClientOptions {
     fn default() -> Self {
         Self {
             client_options: ClientOptions::default(),
-            version: String::from("2018-03-28"),
+            version: String::from("2026-04-06"),
         }
     }
 }
