@@ -293,7 +293,6 @@ impl BlockBlobClient {
     /// * `block_id` - A valid Base64 string value that identifies the block. Prior to encoding, the string must be less than
     ///   or equal to 64 bytes in size. For a given blob, the length of the value specified for the blockid parameter must be the
     ///   same size for each block.
-    /// * `content_length` - The length of the request.
     /// * `body` - The body of the request.
     /// * `options` - Optional parameters for the request.
     ///
@@ -333,7 +332,6 @@ impl BlockBlobClient {
     pub async fn stage_block(
         &self,
         block_id: &[u8],
-        content_length: u64,
         body: RequestContent<Bytes, NoFormat>,
         options: Option<BlockBlobClientStageBlockOptions<'_>>,
     ) -> Result<Response<BlockBlobClientStageBlockResult, NoFormat>> {
@@ -348,7 +346,6 @@ impl BlockBlobClient {
         }
         query_builder.build();
         let mut request = Request::new(url, Method::Put);
-        request.insert_header("content-length", content_length.to_string());
         if let Some(transactional_content_md5) = options.transactional_content_md5 {
             request.insert_header("content-md5", base64::encode(transactional_content_md5));
         }
@@ -412,7 +409,6 @@ impl BlockBlobClient {
     /// * `block_id` - A valid Base64 string value that identifies the block. Prior to encoding, the string must be less than
     ///   or equal to 64 bytes in size. For a given blob, the length of the value specified for the blockid parameter must be the
     ///   same size for each block.
-    /// * `content_length` - The length of the request.
     /// * `source_url` - Specify a URL to the copy source.
     /// * `options` - Optional parameters for the request.
     ///
@@ -452,7 +448,6 @@ impl BlockBlobClient {
     pub async fn stage_block_from_url(
         &self,
         block_id: &[u8],
-        content_length: u64,
         source_url: String,
         options: Option<BlockBlobClientStageBlockFromUrlOptions<'_>>,
     ) -> Result<Response<BlockBlobClientStageBlockFromUrlResult, NoFormat>> {
@@ -467,7 +462,6 @@ impl BlockBlobClient {
         }
         query_builder.build();
         let mut request = Request::new(url, Method::Put);
-        request.insert_header("content-length", content_length.to_string());
         request.insert_header("content-type", "application/xml");
         request.insert_header("x-ms-copy-source", source_url);
         if let Some(copy_source_authorization) = options.copy_source_authorization.as_ref() {
@@ -770,7 +764,6 @@ impl BlockBlobClient {
     /// # Arguments
     ///
     /// * `body` - The body of the request.
-    /// * `content_length` - The length of the request.
     /// * `options` - Optional parameters for the request.
     ///
     /// ## Response Headers
@@ -811,7 +804,6 @@ impl BlockBlobClient {
     pub async fn upload_internal(
         &self,
         body: RequestContent<Bytes, NoFormat>,
-        content_length: u64,
         options: Option<BlockBlobClientUploadInternalOptions<'_>>,
     ) -> Result<Response<BlockBlobClientUploadInternalResult, NoFormat>> {
         let options = options.unwrap_or_default();
@@ -823,7 +815,6 @@ impl BlockBlobClient {
         }
         query_builder.build();
         let mut request = Request::new(url, Method::Put);
-        request.insert_header("content-length", content_length.to_string());
         if let Some(transactional_content_md5) = options.transactional_content_md5 {
             request.insert_header("content-md5", base64::encode(transactional_content_md5));
         }

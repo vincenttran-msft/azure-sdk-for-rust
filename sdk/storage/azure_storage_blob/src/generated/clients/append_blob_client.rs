@@ -38,7 +38,6 @@ impl AppendBlobClient {
     /// # Arguments
     ///
     /// * `body` - The body of the request.
-    /// * `content_length` - The length of the request.
     /// * `options` - Optional parameters for the request.
     ///
     /// ## Response Headers
@@ -81,7 +80,6 @@ impl AppendBlobClient {
     pub async fn append_block(
         &self,
         body: RequestContent<Bytes, NoFormat>,
-        content_length: u64,
         options: Option<AppendBlobClientAppendBlockOptions<'_>>,
     ) -> Result<Response<AppendBlobClientAppendBlockResult, NoFormat>> {
         let options = options.unwrap_or_default();
@@ -94,7 +92,6 @@ impl AppendBlobClient {
         }
         query_builder.build();
         let mut request = Request::new(url, Method::Put);
-        request.insert_header("content-length", content_length.to_string());
         if let Some(transactional_content_md5) = options.transactional_content_md5 {
             request.insert_header("content-md5", base64::encode(transactional_content_md5));
         }
@@ -177,7 +174,6 @@ impl AppendBlobClient {
     /// # Arguments
     ///
     /// * `source_url` - Specify a URL to the copy source.
-    /// * `content_length` - The length of the request.
     /// * `options` - Optional parameters for the request.
     ///
     /// ## Response Headers
@@ -220,7 +216,6 @@ impl AppendBlobClient {
     pub async fn append_block_from_url(
         &self,
         source_url: String,
-        content_length: u64,
         options: Option<AppendBlobClientAppendBlockFromUrlOptions<'_>>,
     ) -> Result<Response<AppendBlobClientAppendBlockFromUrlResult, NoFormat>> {
         let options = options.unwrap_or_default();
@@ -233,7 +228,6 @@ impl AppendBlobClient {
         }
         query_builder.build();
         let mut request = Request::new(url, Method::Put);
-        request.insert_header("content-length", content_length.to_string());
         if let Some(transactional_content_md5) = options.transactional_content_md5 {
             request.insert_header("content-md5", base64::encode(transactional_content_md5));
         }

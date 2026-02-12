@@ -635,7 +635,6 @@ impl PageBlobClient {
     /// # Arguments
     ///
     /// * `body` - The body of the request.
-    /// * `content_length` - The length of the request.
     /// * `range` - Bytes of data in the specified range.
     /// * `options` - Optional parameters for the request.
     ///
@@ -678,7 +677,6 @@ impl PageBlobClient {
     pub async fn upload_pages(
         &self,
         body: RequestContent<Bytes, NoFormat>,
-        content_length: u64,
         range: String,
         options: Option<PageBlobClientUploadPagesOptions<'_>>,
     ) -> Result<Response<PageBlobClientUploadPagesResult, NoFormat>> {
@@ -692,7 +690,6 @@ impl PageBlobClient {
         }
         query_builder.build();
         let mut request = Request::new(url, Method::Put);
-        request.insert_header("content-length", content_length.to_string());
         if let Some(transactional_content_md5) = options.transactional_content_md5 {
             request.insert_header("content-md5", base64::encode(transactional_content_md5));
         }
@@ -792,7 +789,6 @@ impl PageBlobClient {
     /// * `source_url` - Specify a URL to the copy source.
     /// * `source_range` - Bytes of source data in the specified range. The length of this range should match the ContentLength
     ///   header and x-ms-range/Range destination range header.
-    /// * `content_length` - The length of the request.
     /// * `range` - Bytes of source data in the specified range. The length of this range should match the ContentLength header
     ///   and x-ms-range/Range destination range header.
     /// * `options` - Optional parameters for the request.
@@ -837,7 +833,6 @@ impl PageBlobClient {
         &self,
         source_url: String,
         source_range: String,
-        content_length: u64,
         range: String,
         options: Option<PageBlobClientUploadPagesFromUrlOptions<'_>>,
     ) -> Result<Response<PageBlobClientUploadPagesFromUrlResult, NoFormat>> {
@@ -851,7 +846,6 @@ impl PageBlobClient {
         }
         query_builder.build();
         let mut request = Request::new(url, Method::Put);
-        request.insert_header("content-length", content_length.to_string());
         if let Some(if_match) = options.if_match.as_ref() {
             request.insert_header("if-match", if_match);
         }
