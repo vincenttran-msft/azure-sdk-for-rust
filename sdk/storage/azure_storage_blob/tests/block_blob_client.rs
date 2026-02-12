@@ -35,7 +35,6 @@ async fn test_block_list(ctx: TestContext) -> Result<(), Box<dyn Error>> {
     block_blob_client
         .stage_block(
             &block_1_id,
-            u64::try_from(block_1.len())?,
             RequestContent::from(block_1.to_vec()),
             None,
         )
@@ -44,7 +43,6 @@ async fn test_block_list(ctx: TestContext) -> Result<(), Box<dyn Error>> {
     block_blob_client
         .stage_block(
             &block_2_id,
-            u64::try_from(block_2.len())?,
             RequestContent::from(block_2.to_vec()),
             None,
         )
@@ -52,7 +50,6 @@ async fn test_block_list(ctx: TestContext) -> Result<(), Box<dyn Error>> {
     block_blob_client
         .stage_block(
             &block_3_id,
-            u64::try_from(block_3.len())?,
             RequestContent::from(block_3.to_vec()),
             None,
         )
@@ -226,7 +223,6 @@ async fn test_stage_block_from_url(ctx: TestContext) -> Result<(), Box<dyn Error
     block_blob_client
         .stage_block_from_url(
             &block_id,
-            u64::try_from(source_content.len())?,
             source_blob_client.url().as_str().into(),
             None,
         )
@@ -300,7 +296,6 @@ async fn test_stage_block_from_url(ctx: TestContext) -> Result<(), Box<dyn Error
     block_blob_client
         .stage_block_from_url(
             &block_id_2,
-            u64::try_from(source_content_2.len())?,
             source_blob_client_2.url().as_str().into(),
             Some(source_auth_options),
         )

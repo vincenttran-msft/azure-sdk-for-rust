@@ -308,7 +308,6 @@ async fn test_blob_version_feature_interactions(ctx: TestContext) -> Result<(), 
         .upload(
             RequestContent::from(data_v1.to_vec()),
             false,
-            u64::try_from(data_v1.len())?,
             None,
         )
         .await?;
@@ -318,7 +317,6 @@ async fn test_blob_version_feature_interactions(ctx: TestContext) -> Result<(), 
         .upload(
             RequestContent::from(data_v2.to_vec()),
             true,
-            u64::try_from(data_v2.len())?,
             None,
         )
         .await?;
@@ -327,13 +325,13 @@ async fn test_blob_version_feature_interactions(ctx: TestContext) -> Result<(), 
     let lease_blob_name = format!("{}-lease", get_blob_name(recording));
     let lease_blob_client = container_client.blob_client(&lease_blob_name);
     lease_blob_client
-        .upload(RequestContent::from(b"v1".to_vec()), false, 2, None)
+        .upload(RequestContent::from(b"v1".to_vec()), false, None)
         .await?;
     let response = lease_blob_client.get_properties(None).await?;
     let lease_version_1 = response.version_id()?.unwrap();
 
     lease_blob_client
-        .upload(RequestContent::from(b"v2".to_vec()), true, 2, None)
+        .upload(RequestContent::from(b"v2".to_vec()), true, None)
         .await?;
 
     // Acquire Lease on Current Version
@@ -521,7 +519,6 @@ async fn test_blob_snapshot_basic_operations(ctx: TestContext) -> Result<(), Box
         .upload(
             RequestContent::from(data_v2.to_vec()),
             true,
-            u64::try_from(data_v2.len())?,
             None,
         )
         .await?;
@@ -868,7 +865,6 @@ async fn test_blob_snapshot_error_cases(ctx: TestContext) -> Result<(), Box<dyn 
         .upload(
             RequestContent::from(data.to_vec()),
             true,
-            u64::try_from(data.len())?,
             None,
         )
         .await;

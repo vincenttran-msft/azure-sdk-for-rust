@@ -38,7 +38,7 @@ async fn upload<const CONTENT_LENGTH: usize>(client: &BlobClient) -> azure_core:
     let stream = GeneratedStream::<_, CONTENT_LENGTH>::default();
 
     client
-        .upload(stream.into(), true, CONTENT_LENGTH as u64, None)
+        .upload(stream.into(), true, None)
         .await?;
 
     Ok(())

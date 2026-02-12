@@ -275,13 +275,11 @@ impl BlobClient {
     /// * `data` - The blob data to upload.
     /// * `overwrite` - Whether the blob to be uploaded should overwrite the current data. If True, `upload()` will overwrite the existing data.
     ///   If False, the operation will fail with ResourceExistsError.
-    /// * `content_length` - Total length of the blob data to be uploaded.
     /// * `options` - Optional configuration for the request.
     pub async fn upload(
         &self,
         data: RequestContent<Bytes, NoFormat>,
         overwrite: bool,
-        content_length: u64,
         options: Option<BlockBlobClientUploadOptions<'_>>,
     ) -> Result<Response<BlockBlobClientUploadResult, NoFormat>> {
         let mut options = options.unwrap_or_default();
@@ -291,7 +289,7 @@ impl BlobClient {
         }
 
         self.block_blob_client()
-            .upload_internal(data, content_length, Some(options))
+            .upload_internal(data, Some(options))
             .await
     }
 

@@ -68,7 +68,6 @@ async fn test_upload_page(ctx: TestContext) -> Result<(), Box<dyn Error>> {
     page_blob_client
         .upload_pages(
             RequestContent::from(data.clone()),
-            512,
             format_page_range(0, 512)?,
             None,
         )
@@ -99,7 +98,6 @@ async fn test_clear_page(ctx: TestContext) -> Result<(), Box<dyn Error>> {
     page_blob_client
         .upload_pages(
             RequestContent::from(data),
-            512,
             format_page_range(0, 512)?,
             None,
         )
@@ -136,7 +134,6 @@ async fn test_resize_blob(ctx: TestContext) -> Result<(), Box<dyn Error>> {
     let response = page_blob_client
         .upload_pages(
             RequestContent::from(data.clone()),
-            1024,
             format_page_range(0, 1024)?,
             None,
         )
@@ -149,7 +146,6 @@ async fn test_resize_blob(ctx: TestContext) -> Result<(), Box<dyn Error>> {
     page_blob_client
         .upload_pages(
             RequestContent::from(data.clone()),
-            1024,
             format_page_range(0, 1024)?,
             None,
         )
@@ -233,7 +229,6 @@ async fn test_upload_page_from_url(ctx: TestContext) -> Result<(), Box<dyn Error
     page_blob_client_1
         .upload_pages(
             RequestContent::from(data_b.clone()),
-            512,
             format_page_range(0, 512)?,
             None,
         )
@@ -244,7 +239,6 @@ async fn test_upload_page_from_url(ctx: TestContext) -> Result<(), Box<dyn Error
     page_blob_client_2
         .upload_pages(
             RequestContent::from(data_a.clone()),
-            512,
             format_page_range(0, 512)?,
             None,
         )
@@ -253,7 +247,6 @@ async fn test_upload_page_from_url(ctx: TestContext) -> Result<(), Box<dyn Error
         .upload_pages_from_url(
             blob_client_1.url().as_str().into(),
             format_page_range(0, data_b.len() as u64)?,
-            data_b.len() as u64,
             format_page_range(512, data_b.len() as u64)?,
             None,
         )
@@ -294,7 +287,6 @@ async fn test_get_page_ranges(ctx: TestContext) -> Result<(), Box<dyn Error>> {
     page_blob_client
         .upload_pages(
             RequestContent::from(data.clone()),
-            512,
             format_page_range(0, 512)?,
             None,
         )
