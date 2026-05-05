@@ -2686,7 +2686,7 @@ impl PageBlobClientUploadPagesResultHeaders
     }
 }
 
-/// Provides access to typed response headers for `PageBlobClient::get_page_ranges()`
+/// Provides access to typed response headers for `PageBlobClient::list_page_ranges()`
 ///
 /// # Examples
 ///

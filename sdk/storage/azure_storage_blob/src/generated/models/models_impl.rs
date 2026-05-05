@@ -5,7 +5,8 @@
 
 use super::{
     BlobItem, BlobServiceProperties, BlobTags, BlockLookupList, ContainerItem, FilterBlobItem,
-    FilteredBlob, ListBlobsResponse, ListContainersResponse, SignedIdentifiers,
+    FilteredBlobResponse, ListBlobsResponse, ListContainersResponse, PageList, PageRange,
+    SignedIdentifiers,
 };
 use async_trait::async_trait;
 use azure_core::{
@@ -15,11 +16,11 @@ use azure_core::{
 };
 
 #[async_trait]
-impl Page for FilteredBlob {
+impl Page for FilteredBlobResponse {
     type Item = FilterBlobItem;
     type IntoIter = <Vec<FilterBlobItem> as IntoIterator>::IntoIter;
     async fn into_items(self) -> Result<Self::IntoIter> {
-        Ok(self.blobs.into_iter())
+        Ok(self.blob_items.into_iter())
     }
 }
 
@@ -38,6 +39,15 @@ impl Page for ListContainersResponse {
     type IntoIter = <Vec<ContainerItem> as IntoIterator>::IntoIter;
     async fn into_items(self) -> Result<Self::IntoIter> {
         Ok(self.container_items.into_iter())
+    }
+}
+
+#[async_trait]
+impl Page for PageList {
+    type Item = PageRange;
+    type IntoIter = <Vec<PageRange> as IntoIterator>::IntoIter;
+    async fn into_items(self) -> Result<Self::IntoIter> {
+        Ok(self.page_range.into_iter())
     }
 }
 
