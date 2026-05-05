@@ -6,13 +6,14 @@
 use super::{
     models_serde,
     xml_helpers::{
-        Blob_itemsBlob, Blob_tag_setTag, BlobsBlob, Committed_blocksBlock,
-        Container_itemsContainer, CorsCorsRule, Uncommitted_blocksBlock,
+        Blob_itemsBlob, Blob_tag_setTag, Committed_blocksBlock, Container_itemsContainer,
+        CorsCorsRule, Uncommitted_blocksBlock,
     },
     AccessTier, ArchiveStatus, BlobType, CopyStatus, GeoReplicationStatusType,
     ImmutabilityPolicyMode, LeaseDuration, LeaseState, LeaseStatus, PublicAccessType,
     RehydratePriority, StorageErrorCode,
 };
+use crate::models::BlobMetadata;
 use azure_core::{base64, fmt::SafeDebug, http::Etag, time::OffsetDateTime};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -146,7 +147,7 @@ pub struct BlobItem {
 
     /// The metadata of the blob.
     #[serde(rename = "Metadata", skip_serializing_if = "Option::is_none")]
-    pub metadata: Option<HashMap<String, String>>,
+    pub metadata: Option<BlobMetadata>,
 
     /// The name of the blob.
     #[serde(
@@ -823,15 +824,15 @@ pub struct FilterBlobItem {
 #[derive(Clone, Default, Deserialize, SafeDebug, Serialize)]
 #[non_exhaustive]
 #[serde(rename = "EnumerationResults")]
-pub struct FilteredBlob {
+pub struct FilteredBlobResponse {
     /// The blob segment.
     #[serde(
         default,
-        deserialize_with = "BlobsBlob::unwrap",
+        deserialize_with = "Blob_itemsBlob::unwrap",
         rename = "Blobs",
-        serialize_with = "BlobsBlob::wrap"
+        serialize_with = "Blob_itemsBlob::wrap"
     )]
-    pub blobs: Vec<FilterBlobItem>,
+    pub blob_items: Vec<FilterBlobItem>,
 
     /// The next marker of the blobs.
     #[serde(rename = "NextMarker", skip_serializing_if = "Option::is_none")]
@@ -904,7 +905,7 @@ pub struct ListBlobsResponse {
     pub service_endpoint: Option<String>,
 }
 
-/// The list container segment response
+/// The list containers response.
 #[derive(Clone, Default, Deserialize, SafeDebug, Serialize)]
 #[non_exhaustive]
 #[serde(rename = "EnumerationResults")]
