@@ -411,16 +411,7 @@ async fn test_find_blobs_by_tags(ctx: TestContext) -> Result<(), Box<dyn Error>>
     create_test_blob(
         &container_client.blob_client(&blob1_name.clone()),
         Some(RequestContent::from("hello world".as_bytes().into())),
-        Some(BlockBlobClientUploadOptions {
-            tags: Some(
-                HashMap::from([
-                    ("foo".to_string(), "bar".to_string()),
-                    ("alice".to_string(), "bob".to_string()),
-                ])
-                .into(),
-            ),
-            ..Default::default()
-        }),
+        Some(BlockBlobClientUploadOptions::default().with_tags([("foo", "bar"), ("alice", "bob")])),
     )
     .await?;
     let blob2_name = get_blob_name(ctx.recording());
@@ -428,24 +419,17 @@ async fn test_find_blobs_by_tags(ctx: TestContext) -> Result<(), Box<dyn Error>>
     create_test_blob(
         &container_client.blob_client(&blob2_name.clone()),
         Some(RequestContent::from("ferris the crab".as_bytes().into())),
-        Some(BlockBlobClientUploadOptions {
-            tags: Some(blob2_tags.clone().into()),
-            ..Default::default()
-        }),
+        Some(BlockBlobClientUploadOptions::default().with_tags(&blob2_tags)),
     )
     .await?;
 
     // Create 3 blobs sharing the same tag to exercise the max-results option
-    let shared_tag = HashMap::from([("env".to_string(), "test".to_string())]);
     for _ in 0..3 {
         let name = get_blob_name(ctx.recording());
         create_test_blob(
             &container_client.blob_client(&name),
             Some(RequestContent::from("data".as_bytes().into())),
-            Some(BlockBlobClientUploadOptions {
-                tags: Some(shared_tag.clone().into()),
-                ..Default::default()
-            }),
+            Some(BlockBlobClientUploadOptions::default().with_tags([("env", "test")])),
         )
         .await?;
     }
@@ -608,10 +592,7 @@ async fn test_list_blobs_with_include_options(ctx: TestContext) -> Result<(), Bo
     create_test_blob(
         &container_client.blob_client(&tags_blob_name),
         None,
-        Some(BlockBlobClientUploadOptions {
-            tags: Some(HashMap::from([("env".to_string(), "test".to_string())]).into()),
-            ..Default::default()
-        }),
+        Some(BlockBlobClientUploadOptions::default().with_tags([("env", "test")])),
     )
     .await?;
 

@@ -3,32 +3,33 @@
 
 use crate::models::{
     method_options::BlockBlobClientUploadOptions, AccessPolicy, AppendBlobClientCreateOptions,
-    BlobTag, BlobTags, BlockBlobClientUploadBlobFromUrlOptions, PageBlobClientCreateOptions,
-    SignedIdentifier, SignedIdentifiers,
+    BlobTag, BlobTags, BlockBlobClientCommitBlockListOptions,
+    BlockBlobClientUploadBlobFromUrlOptions, PageBlobClientCreateOptions, SignedIdentifier,
+    SignedIdentifiers,
 };
 use percent_encoding::{percent_encode, NON_ALPHANUMERIC};
 use std::collections::HashMap;
 
-/// Converts a `BlobTags` to the `x-ms-tags` header string format (`key=value&key2=value2`).
+/// Encodes raw tag key/value pairs into the `x-ms-tags` header string format
+/// (`key=value&key2=value2`).
 ///
 /// Keys and values are percent-encoded to handle special characters (`&`, `=`, spaces, etc.).
-/// Returns `None` if there are no valid tag entries.
-pub(crate) fn blob_tags_to_string(tags: &BlobTags) -> Option<String> {
-    let result = match &tags.blob_tag_set {
-        Some(tag_set) => tag_set
-            .iter()
-            .filter_map(|tag| match (&tag.key, &tag.value) {
-                (Some(k), Some(v)) => {
-                    let encoded_key = percent_encode(k.as_bytes(), NON_ALPHANUMERIC);
-                    let encoded_value = percent_encode(v.as_bytes(), NON_ALPHANUMERIC);
-                    Some(format!("{}={}", encoded_key, encoded_value))
-                }
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join("&"),
-        None => String::new(),
-    };
+/// Returns `None` if the iterator yields no entries.
+pub(crate) fn encode_tags<K, V, I>(tags: I) -> Option<String>
+where
+    K: AsRef<str>,
+    V: AsRef<str>,
+    I: IntoIterator<Item = (K, V)>,
+{
+    let result = tags
+        .into_iter()
+        .map(|(k, v)| {
+            let encoded_key = percent_encode(k.as_ref().as_bytes(), NON_ALPHANUMERIC);
+            let encoded_value = percent_encode(v.as_ref().as_bytes(), NON_ALPHANUMERIC);
+            format!("{}={}", encoded_key, encoded_value)
+        })
+        .collect::<Vec<_>>()
+        .join("&");
     if result.is_empty() {
         None
     } else {
@@ -47,6 +48,20 @@ impl PageBlobClientCreateOptions<'_> {
             ..self
         }
     }
+
+    /// Sets blob tags on the options bag, encoding them for the `x-ms-tags` header.
+    ///
+    /// Pass raw (unencoded) tag keys and values; the SDK percent-encodes them for transport.
+    /// Accepts any iterable of key/value pairs, e.g. `[("env", "test")]` or a `HashMap`.
+    pub fn with_tags<K, V, I>(mut self, tags: I) -> Self
+    where
+        K: AsRef<str>,
+        V: AsRef<str>,
+        I: IntoIterator<Item = (K, V)>,
+    {
+        self.blob_tags_string = encode_tags(tags);
+        self
+    }
 }
 
 /// Augments the current options bag to only create if the Append blob does not already exist.
@@ -59,6 +74,20 @@ impl AppendBlobClientCreateOptions<'_> {
             if_none_match: Some("*".into()),
             ..self
         }
+    }
+
+    /// Sets blob tags on the options bag, encoding them for the `x-ms-tags` header.
+    ///
+    /// Pass raw (unencoded) tag keys and values; the SDK percent-encodes them for transport.
+    /// Accepts any iterable of key/value pairs, e.g. `[("env", "test")]` or a `HashMap`.
+    pub fn with_tags<K, V, I>(mut self, tags: I) -> Self
+    where
+        K: AsRef<str>,
+        V: AsRef<str>,
+        I: IntoIterator<Item = (K, V)>,
+    {
+        self.blob_tags_string = encode_tags(tags);
+        self
     }
 }
 
@@ -73,6 +102,20 @@ impl BlockBlobClientUploadBlobFromUrlOptions<'_> {
             ..self
         }
     }
+
+    /// Sets blob tags on the options bag, encoding them for the `x-ms-tags` header.
+    ///
+    /// Pass raw (unencoded) tag keys and values; the SDK percent-encodes them for transport.
+    /// Accepts any iterable of key/value pairs, e.g. `[("env", "test")]` or a `HashMap`.
+    pub fn with_tags<K, V, I>(mut self, tags: I) -> Self
+    where
+        K: AsRef<str>,
+        V: AsRef<str>,
+        I: IntoIterator<Item = (K, V)>,
+    {
+        self.blob_tags_string = encode_tags(tags);
+        self
+    }
 }
 
 /// Augments the current options bag to only create if the Block blob does not already exist.
@@ -85,6 +128,44 @@ impl BlockBlobClientUploadOptions<'_> {
             if_none_match: Some("*".into()),
             ..self
         }
+    }
+
+    /// Sets blob tags on the options bag, encoding them for the `x-ms-tags` header.
+    ///
+    /// Pass raw (unencoded) tag keys and values; the SDK percent-encodes them for transport.
+    /// Accepts any iterable of key/value pairs, e.g. `[("env", "test")]` or a `HashMap`.
+    pub fn with_tags<K, V, I>(mut self, tags: I) -> Self
+    where
+        K: AsRef<str>,
+        V: AsRef<str>,
+        I: IntoIterator<Item = (K, V)>,
+    {
+        self.blob_tags_string = encode_tags(tags);
+        self
+    }
+}
+
+impl BlockBlobClientCommitBlockListOptions<'_> {
+    /// Augments the current options bag to only commit if the blob does not already exist.
+    pub fn if_not_exists(self) -> Self {
+        Self {
+            if_none_match: Some("*".into()),
+            ..self
+        }
+    }
+
+    /// Sets blob tags on the options bag, encoding them for the `x-ms-tags` header.
+    ///
+    /// Pass raw (unencoded) tag keys and values; the SDK percent-encodes them for transport.
+    /// Accepts any iterable of key/value pairs, e.g. `[("env", "test")]` or a `HashMap`.
+    pub fn with_tags<K, V, I>(mut self, tags: I) -> Self
+    where
+        K: AsRef<str>,
+        V: AsRef<str>,
+        I: IntoIterator<Item = (K, V)>,
+    {
+        self.blob_tags_string = encode_tags(tags);
+        self
     }
 }
 
