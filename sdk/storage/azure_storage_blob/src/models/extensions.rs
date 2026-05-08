@@ -3,8 +3,9 @@
 
 use crate::models::{
     method_options::BlockBlobClientUploadOptions, AccessPolicy, AppendBlobClientCreateOptions,
-    BlobTag, BlobTags, BlockBlobClientUploadBlobFromUrlOptions, PageBlobClientCreateOptions,
-    SignedIdentifier, SignedIdentifiers,
+    BlobTag, BlobTags, BlockBlobClientCommitBlockListOptions,
+    BlockBlobClientUploadBlobFromUrlOptions, PageBlobClientCreateOptions, SignedIdentifier,
+    SignedIdentifiers,
 };
 use percent_encoding::{percent_encode, NON_ALPHANUMERIC};
 use std::collections::HashMap;
@@ -163,6 +164,16 @@ impl BlockBlobClientUploadBlobFromUrlOptions<'_> {
     }
 }
 
+/// Sets blob tags on the options bag, encoding them for the `x-ms-tags` header.
+///
+/// Pass raw (unencoded) tag keys and values; the SDK percent-encodes them for transport.
+impl BlockBlobClientCommitBlockListOptions<'_> {
+    pub fn with_tags(mut self, tags: &BlobTags) -> Self {
+        self.blob_tags_string = blob_tags_to_string(tags);
+        self
+    }
+}
+
 /// Converts a `HashMap<String, AccessPolicy>` into a `SignedIdentifiers` struct.
 impl From<HashMap<String, AccessPolicy>> for SignedIdentifiers {
     fn from(policies: HashMap<String, AccessPolicy>) -> Self {
@@ -245,6 +256,25 @@ mod tests {
             blob_tags_to_string(&tags).as_deref(),
             Some("key%2Bname=v%3D1"),
         );
+    }
+
+    /// Verifies that `&` (the pair separator) and `=` (the key/value separator) are
+    /// percent-encoded when they appear inside a key or value. Without this, a value like
+    /// `c=d` in a key like `a&b` would re-parse as two pairs `a` -> (empty) and `b=c`, and a
+    /// stray `=d` -- silent corruption.
+    ///
+    /// Anchored in findings.md Observation G. The encoder uses `NON_ALPHANUMERIC`, which is a
+    /// strict superset of `{&, =}`, so this is correct by construction; this test prevents a
+    /// future swap to a narrower `AsciiSet` from regressing the separator handling.
+    #[test]
+    fn blob_tags_to_string_percent_encodes_separators() {
+        let tags = BlobTags {
+            blob_tag_set: Some(vec![BlobTag {
+                key: Some("a&b".into()),
+                value: Some("c=d".into()),
+            }]),
+        };
+        assert_eq!(blob_tags_to_string(&tags).as_deref(), Some("a%26b=c%3Dd"),);
     }
 
     /// Verifies the exact byte output for space and `/`. Azure accepts both raw in tag values

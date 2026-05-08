@@ -22,8 +22,8 @@ use azure_core::http::{RequestContent, Url};
 use azure_core_test::{recorded, Matcher, TestContext, TestMode};
 use azure_storage_blob::models::{
     AppendBlobClientCreateOptions, BlobContainerClientFindBlobsByTagsOptions, BlobTag, BlobTags,
-    BlockBlobClientUploadBlobFromUrlOptions, BlockBlobClientUploadOptions,
-    PageBlobClientCreateOptions,
+    BlockBlobClientCommitBlockListOptions, BlockBlobClientUploadBlobFromUrlOptions,
+    BlockBlobClientUploadOptions, BlockLookupList, PageBlobClientCreateOptions,
 };
 use azure_storage_blob_test::{
     create_test_blob, get_blob_name, get_container_client, StorageAccount,
@@ -501,6 +501,56 @@ async fn find_blobs_by_tags_matches_special_char_value(
             .any(|b| b.name.as_deref() == Some(blob_name.as_str())),
         "find_blobs_by_tags must match the raw value '/a/b' on the server side, \
          proving the SDK did not double-encode"
+    );
+
+    container_client.delete(None).await?;
+    Ok(())
+}
+
+/// Locks the new `with_tags()` builder on `BlockBlobClientCommitBlockListOptions`. This is
+/// the canonical large-blob upload path (stage_block + commit_block_list), and prior to this
+/// builder customers had to hand-format the `x-ms-tags` header. Stage two blocks with raw
+/// content, commit them with `with_tags(&special_tags())`, then verify `get_tags` round-trips
+/// byte-equal -- proving the header-encoding path on this fourth tag-bearing operation
+/// matches the contract verified for the other three.
+#[recorded::test]
+async fn commit_block_list_with_tags_special_chars_roundtrip(
+    ctx: TestContext,
+) -> Result<(), Box<dyn Error>> {
+    let recording = ctx.recording();
+    let container_client =
+        get_container_client(recording, true, StorageAccount::Standard, None).await?;
+    let blob_client = container_client.blob_client(&get_blob_name(recording));
+    let block_blob_client = blob_client.block_blob_client();
+
+    let blocks: &[(&[u8], &[u8])] = &[(b"block-1", b"hello "), (b"block-2", b"world")];
+    for (block_id, data) in blocks {
+        block_blob_client
+            .stage_block(
+                block_id,
+                u64::try_from(data.len())?,
+                RequestContent::from(data.to_vec()),
+                None,
+            )
+            .await?;
+    }
+
+    let lookup = BlockLookupList {
+        committed: None,
+        latest: Some(blocks.iter().map(|(id, _)| id.to_vec()).collect()),
+        uncommitted: None,
+    };
+    let expected = special_tags();
+    let options = BlockBlobClientCommitBlockListOptions::default()
+        .with_tags(&blob_tags_from_hashmap(&expected));
+    block_blob_client
+        .commit_block_list(RequestContent::try_from(lookup)?, Some(options))
+        .await?;
+
+    let actual: HashMap<String, String> = blob_client.get_tags(None).await?.into_model()?.into();
+    assert_eq!(
+        expected, actual,
+        "commit_block_list with `with_tags` must encode and round-trip byte-equal"
     );
 
     container_client.delete(None).await?;
