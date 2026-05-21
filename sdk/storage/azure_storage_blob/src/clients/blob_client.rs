@@ -117,6 +117,29 @@ impl BlobClient {
         &self.endpoint
     }
 
+    /// Creates a new BlobClient that authenticates with a Shared Access Signature already
+    /// present in the URL's query string.
+    ///
+    /// The pipeline does not add any authorization header; the embedded SAS authenticates
+    /// every request. Each generated operation appends its own query parameters to the
+    /// URL, preserving the SAS pairs.
+    ///
+    /// # Arguments
+    ///
+    /// * `sas_url` - The full blob URL including the SAS query string (must contain a
+    ///   `sig` query parameter), for example
+    ///   `https://myaccount.blob.core.windows.net/mycontainer/myblob?sv=...&sig=...`.
+    /// * `options` - Optional configuration for the client.
+    pub fn from_sas_url(sas_url: Url, options: Option<BlobClientOptions>) -> Result<Self> {
+        if !sas_url.query_pairs().any(|(k, _)| k.as_ref() == "sig") {
+            return Err(azure_core::Error::with_message(
+                azure_core::error::ErrorKind::Other,
+                format!("{sas_url} is missing the required SAS 'sig' query parameter"),
+            ));
+        }
+        Self::new(sas_url, None, options)
+    }
+
     /// Creates a new BlobClient targeting a specific blob version.
     ///
     /// # Arguments

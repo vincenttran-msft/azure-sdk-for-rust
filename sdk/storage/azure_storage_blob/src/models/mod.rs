@@ -13,6 +13,7 @@ mod method_options;
 pub use http_ranges::HttpRange;
 pub(crate) mod response_ext;
 mod upload_result;
+mod user_delegation_key;
 
 pub use crate::generated::models::*;
 pub use download_result::{BlobClientDownloadResult, BlobDownloadProperties};
@@ -21,6 +22,8 @@ pub use method_options::BlockBlobClientUploadOptions;
 pub use method_options::BlockBlobClientUploadOptions as BlobClientUploadOptions;
 pub use upload_result::BlockBlobClientUploadResult;
 pub use upload_result::BlockBlobClientUploadResult as BlobClientUploadResult;
+pub(crate) use user_delegation_key::KeyInfo;
+pub use user_delegation_key::UserDelegationKey;
 
 use azure_core::fmt::SafeDebug;
 use serde::{Deserialize, Serialize};

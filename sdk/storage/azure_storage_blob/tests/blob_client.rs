@@ -3,7 +3,10 @@
 
 use azure_core::{
     error::ErrorKind,
-    http::{headers::CONTENT_TYPE, ClientOptions, RequestContent, StatusCode, Url},
+    http::{
+        headers::CONTENT_TYPE, new_http_client, ClientOptions, Method, Request, RequestContent,
+        StatusCode, Url,
+    },
     time::{parse_rfc3339, to_rfc3339, OffsetDateTime},
     Bytes,
 };
@@ -22,9 +25,10 @@ use azure_storage_blob::{
     BlobClient, BlobClientOptions, BlobContainerClient, BlobContainerClientOptions, StorageError,
 };
 use azure_storage_blob_test::{
-    create_test_blob, get_blob_name, get_container_client, get_container_name, ClientOptionsExt,
-    StorageAccount, TestPolicy,
+    create_test_blob, get_blob_name, get_blob_service_client, get_container_client,
+    get_container_name, ClientOptionsExt, StorageAccount, TestPolicy,
 };
+use azure_storage_sas::{BlobSasBuilder, BlobSasPermissions, UserDelegationKey};
 use bytes::{BufMut, BytesMut};
 use flate2::{write::GzEncoder, Compression};
 use futures::TryStreamExt;
@@ -1441,4 +1445,196 @@ async fn test_gzip_blob_with_metadata_roundtrip(ctx: TestContext) -> Result<(), 
 
     container_client.delete(None).await?;
     Ok(())
+}
+
+/// Extracts the text content of the first occurrence of `<tag>...</tag>` from
+/// a flat XML fragment. Adequate only for the simple, unnested
+/// `GetUserDelegationKey` response shape used by this test.
+fn extract_xml_text(xml: &str, tag: &str) -> Option<String> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let start = xml.find(&open)? + open.len();
+    let end = xml[start..].find(&close)?;
+    Some(xml[start..start + end].to_string())
+}
+
+#[recorded::test]
+async fn test_blob_sas_upload_then_download_via_sas_url(
+    ctx: TestContext,
+) -> Result<(), Box<dyn Error>> {
+    let recording = ctx.recording();
+
+    // 1. Upload a blob using an authenticated client.
+    let container_client =
+        get_container_client(recording, true, StorageAccount::Standard, None).await?;
+    let blob_name = get_blob_name(recording);
+    let blob_client = container_client.blob_client(&blob_name);
+    let payload = b"hello sas world".to_vec();
+    create_test_blob(
+        &blob_client,
+        Some(RequestContent::from(payload.clone())),
+        None,
+    )
+    .await?;
+
+    // 2. Fetch a UserDelegationKey via the raw REST API. The storage_blob
+    //    crate doesn't yet expose this operation, and the SAS crate is
+    //    UDK-only, so we POST against the service endpoint with a bearer
+    //    token sourced from the test recording's credential.
+    let service_client = get_blob_service_client(recording, StorageAccount::Standard, None)?;
+    let account_endpoint = service_client.url().clone();
+    let account_name = account_endpoint
+        .host_str()
+        .and_then(|h: &str| h.split('.').next())
+        .expect("endpoint host must contain account name")
+        .to_string();
+
+    let token = recording
+        .credential()
+        .get_token(&["https://storage.azure.com/.default"], None)
+        .await?;
+    let now = OffsetDateTime::now_utc();
+    let key_start = now - Duration::from_secs(60);
+    let key_expiry = now + Duration::from_secs(60 * 30);
+    let key_info = format!(
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\
+         <KeyInfo><Start>{}</Start><Expiry>{}</Expiry></KeyInfo>",
+        to_rfc3339(&key_start.replace_nanosecond(0)?),
+        to_rfc3339(&key_expiry.replace_nanosecond(0)?),
+    );
+
+    let mut udk_url = account_endpoint.clone();
+    udk_url.set_query(Some("restype=service&comp=userdelegationkey"));
+    let mut udk_request = Request::new(udk_url, Method::Post);
+    udk_request.insert_header("x-ms-version", "2025-11-05");
+    udk_request.insert_header("authorization", format!("Bearer {}", token.token.secret()));
+    udk_request.insert_header("content-type", "application/xml");
+    udk_request.set_body(key_info);
+
+    let http_client = new_http_client(None);
+    let udk_response = http_client.execute_request(&udk_request).await?;
+    assert_eq!(
+        StatusCode::Ok,
+        udk_response.status(),
+        "GetUserDelegationKey did not return 200"
+    );
+    let udk_body = udk_response.into_body().collect_string().await?;
+
+    let udk = UserDelegationKey::new(
+        extract_xml_text(&udk_body, "SignedOid").expect("SignedOid"),
+        extract_xml_text(&udk_body, "SignedTid").expect("SignedTid"),
+        parse_rfc3339(&extract_xml_text(&udk_body, "SignedStart").expect("SignedStart"))?,
+        parse_rfc3339(&extract_xml_text(&udk_body, "SignedExpiry").expect("SignedExpiry"))?,
+        extract_xml_text(&udk_body, "SignedService").expect("SignedService"),
+        extract_xml_text(&udk_body, "SignedVersion").expect("SignedVersion"),
+        extract_xml_text(&udk_body, "Value").expect("Value"),
+    );
+
+    // 3. Build a read-only blob SAS and produce a complete URL.
+    let sas = BlobSasBuilder::new(
+        get_container_name_from_url(container_client.url())?,
+        blob_name.clone(),
+        key_expiry,
+        BlobSasPermissions::read_only(),
+    )
+    .with_key(udk)
+    .sign(&account_name)?;
+    let sas_url = sas.to_url(account_endpoint.as_str())?;
+
+    // 4. Download via the SAS URL with an unauthenticated HTTP client.
+    let download_request = Request::new(Url::parse(&sas_url)?, Method::Get);
+    let download_response = http_client.execute_request(&download_request).await?;
+    assert_eq!(
+        StatusCode::Ok,
+        download_response.status(),
+        "SAS-authenticated GET did not return 200"
+    );
+    let downloaded = download_response.into_body().collect().await?;
+    assert_eq!(payload, downloaded.to_vec());
+
+    container_client.delete(None).await?;
+    Ok(())
+}
+
+/// Same end-to-end SAS upload/download flow as
+/// `test_blob_sas_upload_then_download_via_sas_url`, but using the convenience
+/// APIs (`BlobServiceClient::get_user_delegation_key`,
+/// `BlobClient::from_sas_url`) instead of raw HTTP requests and XML scraping.
+#[recorded::test]
+async fn test_blob_sas_upload_then_download_via_sas_url_clean(
+    ctx: TestContext,
+) -> Result<(), Box<dyn Error>> {
+    let recording = ctx.recording();
+
+    // 1. Upload a blob using an authenticated client.
+    let container_client =
+        get_container_client(recording, true, StorageAccount::Standard, None).await?;
+    let blob_name = get_blob_name(recording);
+    let blob_client = container_client.blob_client(&blob_name);
+    let payload = b"hello sas world".to_vec();
+    create_test_blob(
+        &blob_client,
+        Some(RequestContent::from(payload.clone())),
+        None,
+    )
+    .await?;
+
+    // 2. Fetch the UserDelegationKey through the service client.
+    let service_client = get_blob_service_client(recording, StorageAccount::Standard, None)?;
+    let account_endpoint = service_client.url().clone();
+    let account_name = account_endpoint
+        .host_str()
+        .and_then(|h: &str| h.split('.').next())
+        .expect("endpoint host must contain account name")
+        .to_string();
+    let now = OffsetDateTime::now_utc();
+    let key_start = now - Duration::from_secs(60);
+    let key_expiry = now + Duration::from_secs(60 * 30);
+    let key = service_client
+        .get_user_delegation_key(key_start, key_expiry, None)
+        .await?
+        .into_model()?;
+    let udk = UserDelegationKey::new(
+        key.signed_object_id,
+        key.signed_tenant_id,
+        parse_rfc3339(&key.signed_start)?,
+        parse_rfc3339(&key.signed_expiry)?,
+        key.signed_service,
+        key.signed_version,
+        key.value,
+    );
+
+    // 3. Build a read-only blob SAS URL.
+    let sas = BlobSasBuilder::new(
+        get_container_name_from_url(container_client.url())?,
+        blob_name.clone(),
+        key_expiry,
+        BlobSasPermissions::read_only(),
+    )
+    .with_key(udk)
+    .sign(&account_name)?;
+    let sas_url = sas.to_url(blob_client.url().as_str())?;
+
+    // 4. Download via a SAS-authenticated BlobClient.
+    let sas_client = BlobClient::from_sas_url(Url::parse(&sas_url)?, None)?;
+    let response = sas_client.download(None).await?;
+    let downloaded = response.body.collect().await?;
+    assert_eq!(payload, downloaded.to_vec());
+
+    container_client.delete(None).await?;
+    Ok(())
+}
+
+/// The container URL is `<endpoint>/<container>`; the SAS builder needs the
+/// container name in isolation.
+fn get_container_name_from_url(url: &Url) -> Result<String, Box<dyn Error>> {
+    let mut segments = url
+        .path_segments()
+        .ok_or("container URL has no path segments")?
+        .filter(|s| !s.is_empty());
+    let name = segments
+        .next()
+        .ok_or("container URL is missing the container name segment")?
+        .to_string();
+    Ok(name)
 }

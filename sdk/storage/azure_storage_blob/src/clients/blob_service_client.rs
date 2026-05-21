@@ -3,16 +3,34 @@
 
 pub use crate::generated::clients::{BlobServiceClient, BlobServiceClientOptions};
 
-use crate::{BlobClient, BlobContainerClient};
+use crate::{
+    models::{KeyInfo, UserDelegationKey},
+    BlobClient, BlobContainerClient,
+};
 use azure_core::{
     credentials::TokenCredential,
+    error::CheckSuccessOptions,
+    fmt::SafeDebug,
     http::{
         policies::{auth::BearerTokenAuthorizationPolicy, Policy},
-        Pipeline, Url,
+        ClientMethodOptions, Method, Pipeline, PipelineSendOptions, Request, Response, Url, UrlExt,
+        XmlFormat,
     },
-    tracing, Result,
+    time::{to_rfc3339, OffsetDateTime},
+    tracing, xml, Result,
 };
 use std::sync::Arc;
+
+/// Options to be passed to [`BlobServiceClient::get_user_delegation_key`].
+#[derive(Clone, Default, SafeDebug)]
+pub struct BlobServiceClientGetUserDelegationKeyOptions<'a> {
+    /// Allows customization of the method call.
+    pub method_options: ClientMethodOptions<'a>,
+
+    /// The timeout parameter, expressed in seconds. See
+    /// [Setting Timeouts for Blob Service Operations](https://learn.microsoft.com/rest/api/storageservices/setting-timeouts-for-blob-service-operations).
+    pub timeout: Option<i32>,
+}
 
 impl BlobServiceClient {
     /// Creates a new BlobServiceClient from a service URL.
@@ -115,5 +133,61 @@ impl BlobServiceClient {
     /// Gets the URL of the resource this client is configured for.
     pub fn url(&self) -> &Url {
         &self.endpoint
+    }
+
+    /// Requests a user delegation key from the service.
+    ///
+    /// The returned key contains secret material used to sign
+    /// [user delegation SAS](https://learn.microsoft.com/rest/api/storageservices/create-user-delegation-sas)
+    /// tokens. The client must be authenticated with a [`TokenCredential`].
+    ///
+    /// # Arguments
+    ///
+    /// * `start` - The time at which the key becomes valid. Sub-second precision is dropped.
+    /// * `expiry` - The time at which the key expires (maximum 7 days from `start`). Sub-second precision is dropped.
+    /// * `options` - Optional parameters for the request.
+    #[tracing::function("Storage.Blob.BlobServiceClient.getUserDelegationKey")]
+    pub async fn get_user_delegation_key(
+        &self,
+        start: OffsetDateTime,
+        expiry: OffsetDateTime,
+        options: Option<BlobServiceClientGetUserDelegationKeyOptions<'_>>,
+    ) -> Result<Response<UserDelegationKey, XmlFormat>> {
+        let options = options.unwrap_or_default();
+        let ctx = options.method_options.context.to_borrowed();
+        let mut url = self.endpoint.clone();
+        let mut query_builder = url.query_builder();
+        query_builder
+            .append_pair("comp", "userdelegationkey")
+            .append_pair("restype", "service");
+        if let Some(timeout) = options.timeout {
+            query_builder.set_pair("timeout", timeout.to_string());
+        }
+        query_builder.build();
+        let start = start.replace_nanosecond(0).unwrap_or(start);
+        let expiry = expiry.replace_nanosecond(0).unwrap_or(expiry);
+        let body = xml::to_xml(&KeyInfo {
+            start: to_rfc3339(&start),
+            expiry: to_rfc3339(&expiry),
+        })?;
+        let mut request = Request::new(url, Method::Post);
+        request.insert_header("accept", "application/xml");
+        request.insert_header("content-type", "application/xml");
+        request.insert_header("x-ms-version", &self.version);
+        request.set_body(body);
+        let rsp = self
+            .pipeline
+            .send(
+                &ctx,
+                &mut request,
+                Some(PipelineSendOptions {
+                    check_success: CheckSuccessOptions {
+                        success_codes: &[200],
+                    },
+                    ..Default::default()
+                }),
+            )
+            .await?;
+        Ok(rsp.into())
     }
 }

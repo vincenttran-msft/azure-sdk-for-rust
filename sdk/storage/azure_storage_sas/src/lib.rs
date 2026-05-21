@@ -9,6 +9,7 @@ mod common;
 mod ip_range;
 mod key;
 mod protocol;
+mod queue;
 
 pub use blob::{
     BlobContainerSasBuilder, BlobContainerSasPermissions, BlobSasBuilder, BlobSasPermissions,
@@ -17,6 +18,7 @@ pub use blob::{
 pub use ip_range::SasIpRange;
 pub use key::UserDelegationKey;
 pub use protocol::SasProtocol;
+pub use queue::{QueueSasBuilder, QueueSasPermissions, QueueSasQueryParameters};
 
 /// Type-state marker indicating that a SAS builder has no signing key set yet.
 #[derive(Debug, Default)]
@@ -31,7 +33,7 @@ pub struct WithKey(pub(crate) UserDelegationKey);
 ///
 /// This is intentionally not configurable. To change service versions, upgrade
 /// to a newer release of `azure_storage_sas`.
-pub const SAS_VERSION: &str = "2026-04-06";
+pub const SAS_VERSION: &str = "2026-06-06";
 
 /// Returns the SAS service version emitted by this crate.
 pub fn sas_version() -> &'static str {

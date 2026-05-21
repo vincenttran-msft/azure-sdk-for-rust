@@ -72,6 +72,32 @@ pub(crate) fn sign(string_to_sign: &str, key: &str) -> Result<String> {
     hmac_sha256(string_to_sign, &Secret::new(key.to_string()))
 }
 
+/// Percent-encoding set for SAS query parameter values
+/// (form-urlencoded-compatible).
+const QUERY: &AsciiSet = &CONTROLS
+    .add(b' ')
+    .add(b'"')
+    .add(b'#')
+    .add(b'%')
+    .add(b'&')
+    .add(b'+')
+    .add(b'/')
+    .add(b'<')
+    .add(b'=')
+    .add(b'>')
+    .add(b'?')
+    .add(b'`')
+    .add(b'{')
+    .add(b'}')
+    .add(b'\\')
+    .add(b'^')
+    .add(b'|');
+
+/// Percent-encode a single SAS query parameter value.
+pub(crate) fn encode_query(value: &str) -> String {
+    utf8_percent_encode(value, QUERY).to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

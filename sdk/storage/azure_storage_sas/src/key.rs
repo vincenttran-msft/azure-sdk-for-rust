@@ -26,6 +26,10 @@ pub struct UserDelegationKey {
     pub signed_service: String,
     /// The service version used to issue the key.
     pub signed_version: String,
+    /// The AAD tenant ID of the end user that this key was delegated to, if
+    /// any. Returned by the service in cross-tenant `Get User Delegation Key`
+    /// responses and signed as `skdutid` on a user-bound user delegation SAS.
+    pub signed_delegated_user_tenant_id: Option<String>,
     /// The base64-encoded secret key value.
     #[safe(false)]
     pub value: String,
@@ -49,7 +53,18 @@ impl UserDelegationKey {
             signed_expiry,
             signed_service: signed_service.into(),
             signed_version: signed_version.into(),
+            signed_delegated_user_tenant_id: None,
             value: value.into(),
         }
+    }
+
+    /// Attach the AAD tenant ID of the end user this key was delegated to.
+    ///
+    /// Required only for cross-tenant user-bound user delegation SAS tokens;
+    /// must match the `DelegatedUserTid` value supplied when the key was
+    /// requested from the service.
+    pub fn with_signed_delegated_user_tenant_id(mut self, value: impl Into<String>) -> Self {
+        self.signed_delegated_user_tenant_id = Some(value.into());
+        self
     }
 }

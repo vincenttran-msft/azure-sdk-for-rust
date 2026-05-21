@@ -21,22 +21,34 @@ azure_storage_sas = "1.0.0"
 
 ## Examples
 
-```rust no_run
+Sign a SAS for a single blob using a user delegation key:
+
+```rust
 use azure_storage_sas::{
     BlobSasBuilder, BlobSasPermissions, SasProtocol, UserDelegationKey,
 };
 use time::{Duration, OffsetDateTime};
 
-# fn example(udk: UserDelegationKey) -> azure_core::Result<()> {
+# fn main() -> azure_core::Result<()> {
 let now = OffsetDateTime::now_utc();
-let mut permissions = BlobSasPermissions::default();
-permissions.read = true;
+
+// In real code, obtain this by calling
+// `BlobServiceClient::get_user_delegation_key`.
+let udk = UserDelegationKey::new(
+    "00000000-0000-0000-0000-000000000000",
+    "00000000-0000-0000-0000-000000000000",
+    now,
+    now + Duration::hours(1),
+    "b",
+    "2026-04-06",
+    "dGVzdC1rZXk=", // base64-encoded secret
+);
 
 let sas = BlobSasBuilder::new(
     "my-container".to_string(),
     "my-blob.txt".to_string(),
     now + Duration::hours(1),
-    permissions,
+    BlobSasPermissions::read_only(),
 )
 .start(now)
 .protocol(SasProtocol::Https)
@@ -44,6 +56,7 @@ let sas = BlobSasBuilder::new(
 .sign("myaccount")?;
 
 let url = sas.to_url("https://myaccount.blob.core.windows.net")?;
+assert!(url.contains("sig="));
 # Ok(()) }
 ```
 
