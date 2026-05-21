@@ -845,6 +845,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "azure_storage_sas"
+version = "1.0.0"
+dependencies = [
+ "azure_core 1.0.0",
+ "percent-encoding",
+ "time",
+ "url",
+]
+
+[[package]]
 name = "base64"
 version = "0.21.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
