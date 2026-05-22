@@ -259,11 +259,11 @@ mod tests {
         UserDelegationKey {
             signed_oid: "oid-value".into(),
             signed_tid: "tid-value".into(),
-            signed_start: "2025-01-15T00:00:00Z".into(),
-            signed_expiry: "2025-01-16T00:00:00Z".into(),
+            signed_start: datetime!(2025-01-15 00:00:00 UTC),
+            signed_expiry: datetime!(2025-01-16 00:00:00 UTC),
             signed_service: "b".into(),
             signed_version: "2025-11-05".into(),
-            value: "dGVzdGtleQ==".into(),
+            value: vec![116, 101, 115, 116, 107, 101, 121], // "testkey"
         }
     }
 

@@ -81,8 +81,8 @@ impl Resource for Queue {
             cr = self.canonicalized_resource(&fields.account),
             skoid = context.signed_oid,
             sktid = context.signed_tid,
-            skt = context.signed_start,
-            ske = context.signed_expiry,
+            skt = Fields::format_time(&context.signed_start),
+            ske = Fields::format_time(&context.signed_expiry),
             sks = context.signed_service,
             skv = context.signed_version,
             skdutid = fields.delegated_tenant_id.as_deref().unwrap_or(""),
@@ -116,8 +116,14 @@ impl Resource for Queue {
         }
         parts.push(format!("skoid={}", context.signed_oid));
         parts.push(format!("sktid={}", context.signed_tid));
-        parts.push(format!("skt={}", context.signed_start));
-        parts.push(format!("ske={}", context.signed_expiry));
+        parts.push(format!(
+            "skt={}",
+            Fields::format_time(&context.signed_start)
+        ));
+        parts.push(format!(
+            "ske={}",
+            Fields::format_time(&context.signed_expiry)
+        ));
         parts.push(format!("sks={}", context.signed_service));
         parts.push(format!("skv={}", context.signed_version));
         if let Some(ref v) = fields.delegated_tenant_id {

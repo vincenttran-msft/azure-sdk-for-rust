@@ -47,8 +47,8 @@ pub(crate) fn blob_udk_string_to_sign(
         cr = canonicalized_resource,
         skoid = key.signed_oid,
         sktid = key.signed_tid,
-        skt = key.signed_start,
-        ske = key.signed_expiry,
+        skt = Fields::format_time(&key.signed_start),
+        ske = Fields::format_time(&key.signed_expiry),
         sks = key.signed_service,
         skv = key.signed_version,
         saoid = fields.authorized_object_id.as_deref().unwrap_or(""),
@@ -97,8 +97,8 @@ pub(crate) fn blob_udk_query_parameters(
     }
     parts.push(format!("skoid={}", key.signed_oid));
     parts.push(format!("sktid={}", key.signed_tid));
-    parts.push(format!("skt={}", key.signed_start));
-    parts.push(format!("ske={}", key.signed_expiry));
+    parts.push(format!("skt={}", Fields::format_time(&key.signed_start)));
+    parts.push(format!("ske={}", Fields::format_time(&key.signed_expiry)));
     parts.push(format!("sks={}", key.signed_service));
     parts.push(format!("skv={}", key.signed_version));
     if let Some(ref v) = fields.authorized_object_id {

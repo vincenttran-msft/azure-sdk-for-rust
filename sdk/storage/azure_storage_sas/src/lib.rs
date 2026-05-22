@@ -45,15 +45,16 @@
 //! ```rust
 //! use azure_storage_sas::{SasBuilder, UserDelegationKey, resource::blob::{Blob, BlobPermissions}};
 //! use time::OffsetDateTime;
+//! use time::macros::datetime;
 //!
 //! let udk = UserDelegationKey {
 //!     signed_oid: "object-id".into(),
 //!     signed_tid: "tenant-id".into(),
-//!     signed_start: "2025-05-21T00:00:00Z".into(),
-//!     signed_expiry: "2025-05-22T00:00:00Z".into(),
+//!     signed_start: datetime!(2025-05-21 00:00:00 UTC),
+//!     signed_expiry: datetime!(2025-05-22 00:00:00 UTC),
 //!     signed_service: "b".into(),
 //!     signed_version: "2025-11-05".into(),
-//!     value: "base64-key-value".into(),
+//!     value: vec![0; 32], // decoded key bytes
 //! };
 //!
 //! let resource = Blob::new("images", "photo.jpg");
@@ -74,13 +75,14 @@
 //! ```rust
 //! use azure_storage_sas::{SasBuilder, UserDelegationKey, resource::blob::{Blob, BlobPermissions}};
 //! use time::OffsetDateTime;
+//! use time::macros::datetime;
 //!
 //! # let udk = UserDelegationKey {
 //! #     signed_oid: "oid".into(), signed_tid: "tid".into(),
-//! #     signed_start: "2025-05-21T00:00:00Z".into(),
-//! #     signed_expiry: "2025-05-22T00:00:00Z".into(),
+//! #     signed_start: datetime!(2025-05-21 00:00:00 UTC),
+//! #     signed_expiry: datetime!(2025-05-22 00:00:00 UTC),
 //! #     signed_service: "b".into(), signed_version: "2025-11-05".into(),
-//! #     value: "key".into(),
+//! #     value: vec![0; 32],
 //! # };
 //! let resource = Blob::new("backups", "db.bak")
 //!     .snapshot("2025-05-20T10:00:00.0000000Z");
@@ -99,13 +101,14 @@
 //! use azure_storage_sas::{SasBuilder, SasIpRange, UserDelegationKey, resource::blob::{Container, ContainerPermissions}};
 //! use std::net::Ipv4Addr;
 //! use time::OffsetDateTime;
+//! use time::macros::datetime;
 //!
 //! # let udk = UserDelegationKey {
 //! #     signed_oid: "oid".into(), signed_tid: "tid".into(),
-//! #     signed_start: "2025-05-21T00:00:00Z".into(),
-//! #     signed_expiry: "2025-05-22T00:00:00Z".into(),
+//! #     signed_start: datetime!(2025-05-21 00:00:00 UTC),
+//! #     signed_expiry: datetime!(2025-05-22 00:00:00 UTC),
 //! #     signed_service: "b".into(), signed_version: "2025-11-05".into(),
-//! #     value: "key".into(),
+//! #     value: vec![0; 32],
 //! # };
 //! let resource = Container::new("logs");
 //! let permissions = ContainerPermissions { read: true, list: true, ..Default::default() };
@@ -127,13 +130,14 @@
 //! ```rust
 //! use azure_storage_sas::{SasBuilder, UserDelegationKey, resource::blob::{Directory, ContainerPermissions}};
 //! use time::OffsetDateTime;
+//! use time::macros::datetime;
 //!
 //! # let udk = UserDelegationKey {
 //! #     signed_oid: "oid".into(), signed_tid: "tid".into(),
-//! #     signed_start: "2025-05-21T00:00:00Z".into(),
-//! #     signed_expiry: "2025-05-22T00:00:00Z".into(),
+//! #     signed_start: datetime!(2025-05-21 00:00:00 UTC),
+//! #     signed_expiry: datetime!(2025-05-22 00:00:00 UTC),
 //! #     signed_service: "b".into(), signed_version: "2025-11-05".into(),
-//! #     value: "key".into(),
+//! #     value: vec![0; 32],
 //! # };
 //! // Depth is computed automatically from the path (2 segments here)
 //! let resource = Directory::new("filesystem", "path/to");
@@ -152,13 +156,14 @@
 //! ```rust
 //! use azure_storage_sas::{SasBuilder, SasProtocol, UserDelegationKey, resource::{Queue, QueuePermissions}};
 //! use time::OffsetDateTime;
+//! use time::macros::datetime;
 //!
 //! # let udk = UserDelegationKey {
 //! #     signed_oid: "oid".into(), signed_tid: "tid".into(),
-//! #     signed_start: "2025-05-21T00:00:00Z".into(),
-//! #     signed_expiry: "2025-05-22T00:00:00Z".into(),
+//! #     signed_start: datetime!(2025-05-21 00:00:00 UTC),
+//! #     signed_expiry: datetime!(2025-05-22 00:00:00 UTC),
 //! #     signed_service: "b".into(), signed_version: "2025-11-05".into(),
-//! #     value: "key".into(),
+//! #     value: vec![0; 32],
 //! # };
 //! let resource = Queue::new("work-items");
 //! let permissions = QueuePermissions { read: true, process: true, ..Default::default() };

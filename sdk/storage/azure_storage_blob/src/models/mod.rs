@@ -9,6 +9,8 @@ pub(crate) mod error;
 pub(crate) mod extensions;
 pub(crate) mod http_ranges;
 mod method_options;
+#[cfg(feature = "sas")]
+mod sas;
 
 pub use http_ranges::HttpRange;
 pub(crate) mod response_ext;

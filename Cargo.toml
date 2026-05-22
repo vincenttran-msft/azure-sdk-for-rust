@@ -83,6 +83,10 @@ version = "1.0.0"
 [workspace.dependencies.azure_storage_blob]
 version = "1.0.0"
 
+[workspace.dependencies.azure_storage_sas]
+version = "0.1.0"
+path = "sdk/storage/azure_storage_sas"
+
 [workspace.dependencies.azure_data_cosmos]
 version = "0.34.0"
 path = "sdk/cosmos/azure_data_cosmos"
