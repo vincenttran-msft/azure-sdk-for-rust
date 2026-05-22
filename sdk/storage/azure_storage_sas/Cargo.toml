@@ -1,0 +1,24 @@
+[package]
+name = "azure_storage_sas"
+version = "0.1.0"
+description = "Shared Access Signature (SAS) builder for Microsoft Azure Storage services"
+readme = "README.md"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+homepage = "https://github.com/azure/azure-sdk-for-rust"
+documentation = "https://docs.rs/azure_storage_sas"
+keywords = ["sdk", "cloud", "storage", "sas"]
+categories = ["api-bindings"]
+
+[dependencies]
+percent-encoding = { workspace = true }
+time = { workspace = true }
+
+[lints]
+workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
