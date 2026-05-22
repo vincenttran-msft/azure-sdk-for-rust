@@ -4,7 +4,7 @@
 use crate::builder::Fields;
 use crate::resource::blob::container::ContainerPermissions;
 use crate::resource::blob::{blob_udk_query_parameters, blob_udk_string_to_sign};
-use crate::resource::{sealed, BlobServiceResource, DelegatedResource, Resource};
+use crate::resource::{sealed, BlobServiceResource, Resource};
 use crate::UserDelegationKey;
 
 /// A directory resource (ADLS Gen2) for user delegation SAS.
@@ -41,23 +41,21 @@ impl Directory {
 
 impl sealed::Sealed for Directory {}
 impl BlobServiceResource for Directory {}
-impl DelegatedResource for Directory {}
 
 impl Resource for Directory {
     type Permissions = ContainerPermissions;
-    type SigningContext = UserDelegationKey;
 
     fn _build_string_to_sign(
         &self,
         permissions: &Self::Permissions,
         fields: &Fields,
-        context: &Self::SigningContext,
+        key: &UserDelegationKey,
     ) -> String {
         let depth_str = self.depth().to_string();
         blob_udk_string_to_sign(
             permissions,
             fields,
-            context,
+            key,
             "d",
             &self.canonicalized_resource(&fields.account),
             "",
@@ -69,13 +67,13 @@ impl Resource for Directory {
         &self,
         permissions: &Self::Permissions,
         fields: &Fields,
-        context: &Self::SigningContext,
+        key: &UserDelegationKey,
         signature: &str,
     ) -> String {
         blob_udk_query_parameters(
             permissions,
             fields,
-            context,
+            key,
             "d",
             None,
             Some(self.depth()),

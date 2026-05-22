@@ -3,7 +3,7 @@
 
 use crate::builder::Fields;
 use crate::resource::blob::{blob_udk_query_parameters, blob_udk_string_to_sign};
-use crate::resource::{sealed, BlobServiceResource, DelegatedResource, Resource};
+use crate::resource::{sealed, BlobServiceResource, Resource};
 use crate::UserDelegationKey;
 use std::fmt;
 
@@ -96,22 +96,20 @@ impl fmt::Display for ContainerPermissions {
 
 impl sealed::Sealed for Container {}
 impl BlobServiceResource for Container {}
-impl DelegatedResource for Container {}
 
 impl Resource for Container {
     type Permissions = ContainerPermissions;
-    type SigningContext = UserDelegationKey;
 
     fn _build_string_to_sign(
         &self,
         permissions: &Self::Permissions,
         fields: &Fields,
-        context: &Self::SigningContext,
+        key: &UserDelegationKey,
     ) -> String {
         blob_udk_string_to_sign(
             permissions,
             fields,
-            context,
+            key,
             "c",
             &self.canonicalized_resource(&fields.account),
             "",
@@ -123,9 +121,9 @@ impl Resource for Container {
         &self,
         permissions: &Self::Permissions,
         fields: &Fields,
-        context: &Self::SigningContext,
+        key: &UserDelegationKey,
         signature: &str,
     ) -> String {
-        blob_udk_query_parameters(permissions, fields, context, "c", None, None, signature)
+        blob_udk_query_parameters(permissions, fields, key, "c", None, None, signature)
     }
 }

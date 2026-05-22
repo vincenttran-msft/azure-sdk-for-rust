@@ -5,13 +5,12 @@
 
 pub mod blob;
 
-mod account;
 mod queue;
 
-pub use account::{Account, AccountPermissions, AccountResourceTypes, AccountServices};
 pub use queue::{Queue, QueuePermissions};
 
 use crate::builder::Fields;
+use crate::UserDelegationKey;
 use std::fmt;
 
 pub(crate) mod sealed {
@@ -25,18 +24,12 @@ pub trait Resource: sealed::Sealed {
     /// The permissions type for this resource (e.g., `BlobPermissions`).
     type Permissions: fmt::Display;
 
-    /// The signing context required to build the string-to-sign.
-    ///
-    /// For account SAS this is `()` (account key signing is external).
-    /// For user delegation SAS this is [`UserDelegationKey`](crate::UserDelegationKey).
-    type SigningContext;
-
     #[doc(hidden)]
     fn _build_string_to_sign(
         &self,
         permissions: &Self::Permissions,
         fields: &Fields,
-        context: &Self::SigningContext,
+        key: &UserDelegationKey,
     ) -> String;
 
     #[doc(hidden)]
@@ -44,7 +37,7 @@ pub trait Resource: sealed::Sealed {
         &self,
         permissions: &Self::Permissions,
         fields: &Fields,
-        context: &Self::SigningContext,
+        key: &UserDelegationKey,
         signature: &str,
     ) -> String;
 }
@@ -54,6 +47,3 @@ pub trait Resource: sealed::Sealed {
 /// Types implementing this trait support response header overrides and
 /// other blob-service-specific SAS fields.
 pub trait BlobServiceResource: Resource {}
-
-/// Marker trait for resources that use a user delegation key.
-pub trait DelegatedResource: Resource<SigningContext = crate::UserDelegationKey> {}

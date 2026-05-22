@@ -849,7 +849,10 @@ dependencies = [
 name = "azure_storage_sas"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
+ "hmac",
  "percent-encoding",
+ "sha2",
  "time",
 ]
 

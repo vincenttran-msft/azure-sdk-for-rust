@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 use crate::builder::Fields;
-use crate::resource::{sealed, DelegatedResource, Resource};
+use crate::resource::{sealed, Resource};
 use crate::UserDelegationKey;
 use crate::SAS_VERSION;
 use std::fmt;
@@ -55,17 +55,15 @@ impl fmt::Display for QueuePermissions {
 }
 
 impl sealed::Sealed for Queue {}
-impl DelegatedResource for Queue {}
 
 impl Resource for Queue {
     type Permissions = QueuePermissions;
-    type SigningContext = UserDelegationKey;
 
     fn _build_string_to_sign(
         &self,
         permissions: &Self::Permissions,
         fields: &Fields,
-        context: &Self::SigningContext,
+        key: &UserDelegationKey,
     ) -> String {
         // Queue UDK string-to-sign (15 fields):
         // sp, st, se, canonicalizedResource, skoid, sktid, skt, ske, sks, skv,
@@ -79,12 +77,12 @@ impl Resource for Queue {
             st = fields.start_str(),
             se = fields.expiry_str(),
             cr = self.canonicalized_resource(&fields.account),
-            skoid = context.signed_oid,
-            sktid = context.signed_tid,
-            skt = Fields::format_time(&context.signed_start),
-            ske = Fields::format_time(&context.signed_expiry),
-            sks = context.signed_service,
-            skv = context.signed_version,
+            skoid = key.signed_oid,
+            sktid = key.signed_tid,
+            skt = Fields::format_time(&key.signed_start),
+            ske = Fields::format_time(&key.signed_expiry),
+            sks = key.signed_service,
+            skv = key.signed_version,
             skdutid = fields.delegated_tenant_id.as_deref().unwrap_or(""),
             sduoid = fields.delegated_user_object_id.as_deref().unwrap_or(""),
             sip = fields.ip_str(),
@@ -97,7 +95,7 @@ impl Resource for Queue {
         &self,
         permissions: &Self::Permissions,
         fields: &Fields,
-        context: &Self::SigningContext,
+        key: &UserDelegationKey,
         signature: &str,
     ) -> String {
         // Order: sv, st, se, sp, sip, spr, skoid, sktid, skt, ske, sks, skv, skdutid, sduoid, sig
@@ -114,18 +112,12 @@ impl Resource for Queue {
         if let Some(ref proto) = fields.protocol {
             parts.push(format!("spr={proto}"));
         }
-        parts.push(format!("skoid={}", context.signed_oid));
-        parts.push(format!("sktid={}", context.signed_tid));
-        parts.push(format!(
-            "skt={}",
-            Fields::format_time(&context.signed_start)
-        ));
-        parts.push(format!(
-            "ske={}",
-            Fields::format_time(&context.signed_expiry)
-        ));
-        parts.push(format!("sks={}", context.signed_service));
-        parts.push(format!("skv={}", context.signed_version));
+        parts.push(format!("skoid={}", key.signed_oid));
+        parts.push(format!("sktid={}", key.signed_tid));
+        parts.push(format!("skt={}", Fields::format_time(&key.signed_start)));
+        parts.push(format!("ske={}", Fields::format_time(&key.signed_expiry)));
+        parts.push(format!("sks={}", key.signed_service));
+        parts.push(format!("skv={}", key.signed_version));
         if let Some(ref v) = fields.delegated_tenant_id {
             parts.push(format!("skdutid={v}"));
         }
