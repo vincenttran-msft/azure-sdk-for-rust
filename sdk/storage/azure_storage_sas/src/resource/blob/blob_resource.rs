@@ -1,10 +1,6 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-use crate::builder::Fields;
-use crate::resource::blob::{blob_udk_query_parameters, blob_udk_string_to_sign};
-use crate::resource::{sealed, BlobServiceResource, Resource};
-use crate::UserDelegationKey;
 use std::fmt;
 
 /// A blob resource for user delegation SAS.
@@ -46,7 +42,7 @@ impl Blob {
         self
     }
 
-    fn signed_resource(&self) -> &'static str {
+    pub(crate) fn signed_resource(&self) -> &'static str {
         if self.snapshot.is_some() {
             "bs"
         } else if self.version_id.is_some() {
@@ -56,8 +52,12 @@ impl Blob {
         }
     }
 
-    fn canonicalized_resource(&self, account: &str) -> String {
+    pub(crate) fn canonicalized_resource(&self, account: &str) -> String {
         format!("/blob/{}/{}/{}", account, self.container, self.blob)
+    }
+
+    pub(crate) fn snapshot_time(&self) -> Option<&str> {
+        self.snapshot.as_deref()
     }
 }
 
@@ -79,6 +79,91 @@ pub struct BlobPermissions {
     pub ownership: bool,
     pub permissions: bool,
     pub set_immutability_policy: bool,
+}
+
+impl BlobPermissions {
+    /// Creates a new permissions set with all permissions disabled.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Enables read permission.
+    pub fn read(mut self) -> Self {
+        self.read = true;
+        self
+    }
+
+    /// Enables add permission.
+    pub fn add(mut self) -> Self {
+        self.add = true;
+        self
+    }
+
+    /// Enables create permission.
+    pub fn create(mut self) -> Self {
+        self.create = true;
+        self
+    }
+
+    /// Enables write permission.
+    pub fn write(mut self) -> Self {
+        self.write = true;
+        self
+    }
+
+    /// Enables delete permission.
+    pub fn delete(mut self) -> Self {
+        self.delete = true;
+        self
+    }
+
+    /// Enables delete version permission.
+    pub fn delete_version(mut self) -> Self {
+        self.delete_version = true;
+        self
+    }
+
+    /// Enables permanent delete permission.
+    pub fn permanent_delete(mut self) -> Self {
+        self.permanent_delete = true;
+        self
+    }
+
+    /// Enables tags permission.
+    pub fn tags(mut self) -> Self {
+        self.tags = true;
+        self
+    }
+
+    /// Enables move blob permission.
+    pub fn move_blob(mut self) -> Self {
+        self.move_blob = true;
+        self
+    }
+
+    /// Enables execute permission.
+    pub fn execute(mut self) -> Self {
+        self.execute = true;
+        self
+    }
+
+    /// Enables ownership permission.
+    pub fn ownership(mut self) -> Self {
+        self.ownership = true;
+        self
+    }
+
+    /// Enables permissions permission.
+    pub fn permissions(mut self) -> Self {
+        self.permissions = true;
+        self
+    }
+
+    /// Enables set immutability policy permission.
+    pub fn set_immutability_policy(mut self) -> Self {
+        self.set_immutability_policy = true;
+        self
+    }
 }
 
 impl fmt::Display for BlobPermissions {
@@ -123,47 +208,5 @@ impl fmt::Display for BlobPermissions {
             f.write_str("i")?;
         }
         Ok(())
-    }
-}
-
-impl sealed::Sealed for Blob {}
-impl BlobServiceResource for Blob {}
-
-impl Resource for Blob {
-    type Permissions = BlobPermissions;
-
-    fn _build_string_to_sign(
-        &self,
-        permissions: &Self::Permissions,
-        fields: &Fields,
-        key: &UserDelegationKey,
-    ) -> String {
-        blob_udk_string_to_sign(
-            permissions,
-            fields,
-            key,
-            self.signed_resource(),
-            &self.canonicalized_resource(&fields.account),
-            self.snapshot.as_deref().unwrap_or(""),
-            "",
-        )
-    }
-
-    fn _build_query_parameters(
-        &self,
-        permissions: &Self::Permissions,
-        fields: &Fields,
-        key: &UserDelegationKey,
-        signature: &str,
-    ) -> String {
-        blob_udk_query_parameters(
-            permissions,
-            fields,
-            key,
-            self.signed_resource(),
-            self.snapshot.as_deref(),
-            None,
-            signature,
-        )
     }
 }

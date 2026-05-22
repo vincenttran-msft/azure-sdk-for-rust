@@ -1,10 +1,6 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-use crate::builder::Fields;
-use crate::resource::blob::{blob_udk_query_parameters, blob_udk_string_to_sign};
-use crate::resource::{sealed, BlobServiceResource, Resource};
-use crate::UserDelegationKey;
 use std::fmt;
 
 /// A container resource for user delegation SAS.
@@ -20,7 +16,7 @@ impl Container {
         }
     }
 
-    fn canonicalized_resource(&self, account: &str) -> String {
+    pub(crate) fn canonicalized_resource(&self, account: &str) -> String {
         format!("/blob/{}/{}", account, self.container)
     }
 }
@@ -44,6 +40,97 @@ pub struct ContainerPermissions {
     pub ownership: bool,
     pub permissions: bool,
     pub set_immutability_policy: bool,
+}
+
+impl ContainerPermissions {
+    /// Creates a new permissions set with all permissions disabled.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Enables read permission.
+    pub fn read(mut self) -> Self {
+        self.read = true;
+        self
+    }
+
+    /// Enables add permission.
+    pub fn add(mut self) -> Self {
+        self.add = true;
+        self
+    }
+
+    /// Enables create permission.
+    pub fn create(mut self) -> Self {
+        self.create = true;
+        self
+    }
+
+    /// Enables write permission.
+    pub fn write(mut self) -> Self {
+        self.write = true;
+        self
+    }
+
+    /// Enables delete permission.
+    pub fn delete(mut self) -> Self {
+        self.delete = true;
+        self
+    }
+
+    /// Enables delete version permission.
+    pub fn delete_version(mut self) -> Self {
+        self.delete_version = true;
+        self
+    }
+
+    /// Enables permanent delete permission.
+    pub fn permanent_delete(mut self) -> Self {
+        self.permanent_delete = true;
+        self
+    }
+
+    /// Enables list permission.
+    pub fn list(mut self) -> Self {
+        self.list = true;
+        self
+    }
+
+    /// Enables tags permission.
+    pub fn tags(mut self) -> Self {
+        self.tags = true;
+        self
+    }
+
+    /// Enables move blob permission.
+    pub fn move_blob(mut self) -> Self {
+        self.move_blob = true;
+        self
+    }
+
+    /// Enables execute permission.
+    pub fn execute(mut self) -> Self {
+        self.execute = true;
+        self
+    }
+
+    /// Enables ownership permission.
+    pub fn ownership(mut self) -> Self {
+        self.ownership = true;
+        self
+    }
+
+    /// Enables permissions permission.
+    pub fn permissions(mut self) -> Self {
+        self.permissions = true;
+        self
+    }
+
+    /// Enables set immutability policy permission.
+    pub fn set_immutability_policy(mut self) -> Self {
+        self.set_immutability_policy = true;
+        self
+    }
 }
 
 impl fmt::Display for ContainerPermissions {
@@ -91,39 +178,5 @@ impl fmt::Display for ContainerPermissions {
             f.write_str("i")?;
         }
         Ok(())
-    }
-}
-
-impl sealed::Sealed for Container {}
-impl BlobServiceResource for Container {}
-
-impl Resource for Container {
-    type Permissions = ContainerPermissions;
-
-    fn _build_string_to_sign(
-        &self,
-        permissions: &Self::Permissions,
-        fields: &Fields,
-        key: &UserDelegationKey,
-    ) -> String {
-        blob_udk_string_to_sign(
-            permissions,
-            fields,
-            key,
-            "c",
-            &self.canonicalized_resource(&fields.account),
-            "",
-            "",
-        )
-    }
-
-    fn _build_query_parameters(
-        &self,
-        permissions: &Self::Permissions,
-        fields: &Fields,
-        key: &UserDelegationKey,
-        signature: &str,
-    ) -> String {
-        blob_udk_query_parameters(permissions, fields, key, "c", None, None, signature)
     }
 }

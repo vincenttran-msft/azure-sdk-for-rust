@@ -5,8 +5,8 @@
 //!
 //! This crate constructs signed SAS query parameter strings for Azure Storage
 //! resources using a user delegation key. The signing (HMAC-SHA256) is handled
-//! internally — just use [`Display`](std::fmt::Display) or
-//! [`to_string()`](ToString::to_string) on the builder to get the final query string.
+//! internally — call [`.build()`](SasBuilder::build) on the builder to get the
+//! final query string.
 //!
 //! # Supported resource types
 //!
@@ -34,13 +34,13 @@
 //!     value: vec![0; 32], // decoded key bytes
 //! };
 //!
-//! let sas = SasBuilder::new("myaccount", Blob::new("images", "photo.jpg"),
-//!     BlobPermissions { read: true, ..Default::default() },
-//!     OffsetDateTime::now_utc() + time::Duration::hours(1), &udk)
-//!     .content_type("image/jpeg");
+//! let token = SasBuilder::new("myaccount", &udk,
+//!     OffsetDateTime::now_utc() + time::Duration::hours(1))
+//!     .blob(Blob::new("images", "photo.jpg"), BlobPermissions::new().read())
+//!     .content_type("image/jpeg")
+//!     .build();
 //!
-//! let url = format!("https://myaccount.blob.core.windows.net/images/photo.jpg?{sas}");
-//! // => "https://myaccount.blob.core.windows.net/images/photo.jpg?sv=2025-11-05&sr=b&..."
+//! let url = format!("https://myaccount.blob.core.windows.net/images/photo.jpg?{token}");
 //! ```
 //!
 //! ## Blob snapshot SAS
@@ -57,13 +57,15 @@
 //! #     signed_service: "b".into(), signed_version: "2025-11-05".into(),
 //! #     value: vec![0; 32],
 //! # };
-//! let sas = SasBuilder::new("myaccount",
-//!     Blob::new("backups", "db.bak").snapshot("2025-05-20T10:00:00.0000000Z"),
-//!     BlobPermissions { read: true, ..Default::default() },
-//!     OffsetDateTime::now_utc() + time::Duration::hours(1), &udk);
+//! let token = SasBuilder::new("myaccount", &udk,
+//!     OffsetDateTime::now_utc() + time::Duration::hours(1))
+//!     .blob(
+//!         Blob::new("backups", "db.bak").snapshot("2025-05-20T10:00:00.0000000Z"),
+//!         BlobPermissions::new().read(),
+//!     )
+//!     .build();
 //!
 //! // sr=bs in the output, snapshot time included in the signed token
-//! let query = sas.to_string();
 //! ```
 //!
 //! ## Container SAS (list + read all blobs)
@@ -81,16 +83,17 @@
 //! #     signed_service: "b".into(), signed_version: "2025-11-05".into(),
 //! #     value: vec![0; 32],
 //! # };
-//! let sas = SasBuilder::new("myaccount", Container::new("logs"),
-//!     ContainerPermissions { read: true, list: true, ..Default::default() },
-//!     OffsetDateTime::now_utc() + time::Duration::hours(4), &udk)
+//! let token = SasBuilder::new("myaccount", &udk,
+//!     OffsetDateTime::now_utc() + time::Duration::hours(4))
 //!     .ip_range(SasIpRange::Range {
 //!         start: Ipv4Addr::new(10, 0, 0, 1).into(),
 //!         end: Ipv4Addr::new(10, 0, 0, 255).into(),
-//!     });
-//!
-//! let query = sas.to_string();
-//! // => "sv=2025-11-05&sr=c&...&sip=10.0.0.1-10.0.0.255&sp=rl&..."
+//!     })
+//!     .container(
+//!         Container::new("logs"),
+//!         ContainerPermissions::new().read().list(),
+//!     )
+//!     .build();
 //! ```
 //!
 //! ## Directory SAS (ADLS Gen2)
@@ -108,12 +111,13 @@
 //! #     value: vec![0; 32],
 //! # };
 //! // Depth is computed automatically from the path (2 segments here)
-//! let sas = SasBuilder::new("myaccount", Directory::new("filesystem", "path/to"),
-//!     ContainerPermissions { read: true, list: true, ..Default::default() },
-//!     OffsetDateTime::now_utc() + time::Duration::hours(1), &udk);
-//!
-//! let query = sas.to_string();
-//! // => "sv=2025-11-05&sr=d&...&sdd=2&..."
+//! let token = SasBuilder::new("myaccount", &udk,
+//!     OffsetDateTime::now_utc() + time::Duration::hours(1))
+//!     .directory(
+//!         Directory::new("filesystem", "path/to"),
+//!         ContainerPermissions::new().read().list(),
+//!     )
+//!     .build();
 //! ```
 //!
 //! ## Queue SAS (read + process messages)
@@ -130,14 +134,12 @@
 //! #     signed_service: "b".into(), signed_version: "2025-11-05".into(),
 //! #     value: vec![0; 32],
 //! # };
-//! let sas = SasBuilder::new("myaccount", Queue::new("work-items"),
-//!     QueuePermissions { read: true, process: true, ..Default::default() },
-//!     OffsetDateTime::now_utc() + time::Duration::hours(8), &udk)
+//! let token = SasBuilder::new("myaccount", &udk,
+//!     OffsetDateTime::now_utc() + time::Duration::hours(8))
 //!     .protocol(SasProtocol::Https)
-//!     .delegated_tenant_id("tenant-id");
-//!
-//! let query = sas.to_string();
-//! // => "sv=2025-11-05&se=...&sp=rp&spr=https&skoid=...&skdutid=tenant-id&sig=..."
+//!     .delegated_tenant_id("tenant-id")
+//!     .queue(Queue::new("work-items"), QueuePermissions::new().read().process())
+//!     .build();
 //! ```
 
 mod builder;
@@ -146,6 +148,8 @@ mod key;
 mod protocol;
 pub mod resource;
 
+pub use builder::state;
+pub use builder::BlobServiceState;
 pub use builder::SasBuilder;
 pub use ip_range::SasIpRange;
 pub use key::UserDelegationKey;

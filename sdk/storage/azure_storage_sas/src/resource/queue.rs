@@ -1,10 +1,6 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-use crate::builder::Fields;
-use crate::resource::{sealed, Resource};
-use crate::UserDelegationKey;
-use crate::SAS_VERSION;
 use std::fmt;
 
 /// A queue resource for user delegation SAS.
@@ -20,7 +16,7 @@ impl Queue {
         }
     }
 
-    fn canonicalized_resource(&self, account: &str) -> String {
+    pub(crate) fn canonicalized_resource(&self, account: &str) -> String {
         format!("/queue/{}/{}", account, self.queue)
     }
 }
@@ -34,6 +30,37 @@ pub struct QueuePermissions {
     pub add: bool,
     pub update: bool,
     pub process: bool,
+}
+
+impl QueuePermissions {
+    /// Creates a new permissions set with all permissions disabled.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Enables read permission.
+    pub fn read(mut self) -> Self {
+        self.read = true;
+        self
+    }
+
+    /// Enables add permission.
+    pub fn add(mut self) -> Self {
+        self.add = true;
+        self
+    }
+
+    /// Enables update permission.
+    pub fn update(mut self) -> Self {
+        self.update = true;
+        self
+    }
+
+    /// Enables process permission.
+    pub fn process(mut self) -> Self {
+        self.process = true;
+        self
+    }
 }
 
 impl fmt::Display for QueuePermissions {
@@ -51,80 +78,5 @@ impl fmt::Display for QueuePermissions {
             f.write_str("p")?;
         }
         Ok(())
-    }
-}
-
-impl sealed::Sealed for Queue {}
-
-impl Resource for Queue {
-    type Permissions = QueuePermissions;
-
-    fn _build_string_to_sign(
-        &self,
-        permissions: &Self::Permissions,
-        fields: &Fields,
-        key: &UserDelegationKey,
-    ) -> String {
-        // Queue UDK string-to-sign (15 fields):
-        // sp, st, se, canonicalizedResource, skoid, sktid, skt, ske, sks, skv,
-        // skdutid, sduoid, sip, spr, sv
-        format!(
-            "{sp}\n{st}\n{se}\n{cr}\n\
-             {skoid}\n{sktid}\n{skt}\n{ske}\n{sks}\n{skv}\n\
-             {skdutid}\n{sduoid}\n\
-             {sip}\n{spr}\n{sv}\n",
-            sp = permissions,
-            st = fields.start_str(),
-            se = fields.expiry_str(),
-            cr = self.canonicalized_resource(&fields.account),
-            skoid = key.signed_oid,
-            sktid = key.signed_tid,
-            skt = Fields::format_time(&key.signed_start),
-            ske = Fields::format_time(&key.signed_expiry),
-            sks = key.signed_service,
-            skv = key.signed_version,
-            skdutid = fields.delegated_tenant_id.as_deref().unwrap_or(""),
-            sduoid = fields.delegated_user_object_id.as_deref().unwrap_or(""),
-            sip = fields.ip_str(),
-            spr = fields.protocol_str(),
-            sv = SAS_VERSION,
-        )
-    }
-
-    fn _build_query_parameters(
-        &self,
-        permissions: &Self::Permissions,
-        fields: &Fields,
-        key: &UserDelegationKey,
-        signature: &str,
-    ) -> String {
-        // Order: sv, st, se, sp, sip, spr, skoid, sktid, skt, ske, sks, skv, skdutid, sduoid, sig
-        let mut parts = Vec::with_capacity(15);
-        parts.push(format!("sv={SAS_VERSION}"));
-        if let Some(ref start) = fields.start {
-            parts.push(format!("st={}", Fields::format_time(start)));
-        }
-        parts.push(format!("se={}", fields.expiry_str()));
-        parts.push(format!("sp={permissions}"));
-        if let Some(ref ip) = fields.ip_range {
-            parts.push(format!("sip={ip}"));
-        }
-        if let Some(ref proto) = fields.protocol {
-            parts.push(format!("spr={proto}"));
-        }
-        parts.push(format!("skoid={}", key.signed_oid));
-        parts.push(format!("sktid={}", key.signed_tid));
-        parts.push(format!("skt={}", Fields::format_time(&key.signed_start)));
-        parts.push(format!("ske={}", Fields::format_time(&key.signed_expiry)));
-        parts.push(format!("sks={}", key.signed_service));
-        parts.push(format!("skv={}", key.signed_version));
-        if let Some(ref v) = fields.delegated_tenant_id {
-            parts.push(format!("skdutid={v}"));
-        }
-        if let Some(ref v) = fields.delegated_user_object_id {
-            parts.push(format!("sduoid={v}"));
-        }
-        parts.push(format!("sig={}", Fields::encode(signature)));
-        parts.join("&")
     }
 }

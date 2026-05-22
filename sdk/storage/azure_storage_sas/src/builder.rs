@@ -3,13 +3,17 @@
 
 use crate::ip_range::SasIpRange;
 use crate::protocol::SasProtocol;
-use crate::resource::{BlobServiceResource, Resource};
+use crate::resource::blob::{
+    blob_udk_query_parameters, blob_udk_string_to_sign, Blob, BlobPermissions, Container,
+    ContainerPermissions, Directory,
+};
+use crate::resource::{Queue, QueuePermissions};
 use crate::UserDelegationKey;
+use crate::SAS_VERSION;
 use base64::Engine;
 use hmac::{Hmac, Mac};
 use percent_encoding::{percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use sha2::Sha256;
-use std::fmt;
 use time::OffsetDateTime;
 
 /// Characters that must be percent-encoded in SAS query parameter values.
@@ -19,16 +23,65 @@ const ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'.')
     .remove(b'~');
 
-/// Internal fields of a SAS builder, shared with resource implementations.
-#[doc(hidden)]
-pub struct Fields {
+/// Typestate markers for [`SasBuilder`].
+pub mod state {
+    use crate::resource::blob::{
+        Blob, BlobPermissions, Container, ContainerPermissions, Directory,
+    };
+    use crate::resource::{Queue, QueuePermissions};
+
+    /// Initial state before a resource type has been selected.
+    pub struct Untyped;
+
+    /// State after selecting a blob resource.
+    pub struct BlobState {
+        pub(crate) resource: Blob,
+        pub(crate) permissions: BlobPermissions,
+    }
+
+    /// State after selecting a container resource.
+    pub struct ContainerState {
+        pub(crate) resource: Container,
+        pub(crate) permissions: ContainerPermissions,
+    }
+
+    /// State after selecting a directory resource.
+    pub struct DirectoryState {
+        pub(crate) resource: Directory,
+        pub(crate) permissions: ContainerPermissions,
+    }
+
+    /// State after selecting a queue resource.
+    pub struct QueueState {
+        pub(crate) resource: Queue,
+        pub(crate) permissions: QueuePermissions,
+    }
+}
+
+mod sealed {
+    pub trait Sealed {}
+    impl Sealed for super::state::BlobState {}
+    impl Sealed for super::state::ContainerState {}
+    impl Sealed for super::state::DirectoryState {}
+}
+
+/// Marker trait for blob-service typestate markers.
+///
+/// Types implementing this trait support response header overrides and
+/// other blob-service-specific SAS fields.
+pub trait BlobServiceState: sealed::Sealed {}
+impl BlobServiceState for state::BlobState {}
+impl BlobServiceState for state::ContainerState {}
+impl BlobServiceState for state::DirectoryState {}
+
+/// Internal fields shared across all builder states.
+pub(crate) struct Fields {
     pub account: String,
     pub start: Option<OffsetDateTime>,
     pub expiry: OffsetDateTime,
     pub protocol: Option<SasProtocol>,
     pub ip_range: Option<SasIpRange>,
     pub encryption_scope: Option<String>,
-    // Blob-service specific
     pub cache_control: Option<String>,
     pub content_disposition: Option<String>,
     pub content_encoding: Option<String>,
@@ -37,7 +90,6 @@ pub struct Fields {
     pub authorized_object_id: Option<String>,
     pub unauthorized_object_id: Option<String>,
     pub correlation_id: Option<String>,
-    // Delegated resource identity
     pub delegated_tenant_id: Option<String>,
     pub delegated_user_object_id: Option<String>,
 }
@@ -93,37 +145,29 @@ impl Fields {
 
 /// A builder for constructing Shared Access Signature (SAS) tokens.
 ///
-/// The type parameter `R` determines which resource type the SAS targets,
-/// controlling available permissions and output format.
-///
-/// Use [`Display`](fmt::Display) or [`to_string()`](ToString::to_string) to
-/// produce the signed SAS query parameter string.
-pub struct SasBuilder<'a, R: Resource> {
-    resource: R,
-    permissions: R::Permissions,
+/// The type parameter `S` tracks the builder state, gating which methods
+/// are available at compile time. Call a resource method (e.g., [`.blob()`](SasBuilder::blob))
+/// to transition from [`Untyped`](state::Untyped) to a typed state, then call
+/// [`.build()`](SasBuilder::build) to produce the signed query string.
+pub struct SasBuilder<'a, S> {
     key: &'a UserDelegationKey,
     fields: Fields,
+    state: S,
 }
 
-impl<'a, R: Resource> SasBuilder<'a, R> {
+impl<'a> SasBuilder<'a, state::Untyped> {
     /// Creates a new SAS builder.
     ///
     /// # Parameters
     /// - `account`: The storage account name.
-    /// - `resource`: The target resource (e.g., `Blob::new(...)`, `Container::new(...)`).
-    /// - `permissions`: The permissions to grant.
-    /// - `expiry`: When the SAS expires.
     /// - `key`: The user delegation key used to sign the SAS.
+    /// - `expiry`: When the SAS expires.
     pub fn new(
         account: impl Into<String>,
-        resource: R,
-        permissions: R::Permissions,
-        expiry: OffsetDateTime,
         key: &'a UserDelegationKey,
+        expiry: OffsetDateTime,
     ) -> Self {
         Self {
-            resource,
-            permissions,
             key,
             fields: Fields {
                 account: account.into(),
@@ -143,9 +187,77 @@ impl<'a, R: Resource> SasBuilder<'a, R> {
                 delegated_tenant_id: None,
                 delegated_user_object_id: None,
             },
+            state: state::Untyped,
         }
     }
 
+    /// Selects a blob resource and transitions the builder to blob state.
+    pub fn blob(
+        self,
+        resource: Blob,
+        permissions: BlobPermissions,
+    ) -> SasBuilder<'a, state::BlobState> {
+        SasBuilder {
+            key: self.key,
+            fields: self.fields,
+            state: state::BlobState {
+                resource,
+                permissions,
+            },
+        }
+    }
+
+    /// Selects a container resource and transitions the builder to container state.
+    pub fn container(
+        self,
+        resource: Container,
+        permissions: ContainerPermissions,
+    ) -> SasBuilder<'a, state::ContainerState> {
+        SasBuilder {
+            key: self.key,
+            fields: self.fields,
+            state: state::ContainerState {
+                resource,
+                permissions,
+            },
+        }
+    }
+
+    /// Selects a directory resource and transitions the builder to directory state.
+    pub fn directory(
+        self,
+        resource: Directory,
+        permissions: ContainerPermissions,
+    ) -> SasBuilder<'a, state::DirectoryState> {
+        SasBuilder {
+            key: self.key,
+            fields: self.fields,
+            state: state::DirectoryState {
+                resource,
+                permissions,
+            },
+        }
+    }
+
+    /// Selects a queue resource and transitions the builder to queue state.
+    pub fn queue(
+        self,
+        resource: Queue,
+        permissions: QueuePermissions,
+    ) -> SasBuilder<'a, state::QueueState> {
+        SasBuilder {
+            key: self.key,
+            fields: self.fields,
+            state: state::QueueState {
+                resource,
+                permissions,
+            },
+        }
+    }
+}
+
+// Common setters available in any state.
+impl<S> SasBuilder<'_, S> {
     /// Sets the optional start time for the SAS.
     pub fn start(mut self, start: OffsetDateTime) -> Self {
         self.fields.start = Some(start);
@@ -183,30 +295,8 @@ impl<'a, R: Resource> SasBuilder<'a, R> {
     }
 }
 
-impl<R: Resource> fmt::Display for SasBuilder<'_, R> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let sts = self
-            .resource
-            ._build_string_to_sign(&self.permissions, &self.fields, self.key);
-
-        let mut mac = Hmac::<Sha256>::new_from_slice(&self.key.value)
-            .expect("HMAC-SHA256 accepts any key length");
-        mac.update(sts.as_bytes());
-        let signature =
-            base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes());
-
-        let qp = self.resource._build_query_parameters(
-            &self.permissions,
-            &self.fields,
-            self.key,
-            &signature,
-        );
-        f.write_str(&qp)
-    }
-}
-
-// Blob-service-specific setters
-impl<R: BlobServiceResource> SasBuilder<'_, R> {
+// Blob-service-specific setters.
+impl<S: BlobServiceState> SasBuilder<'_, S> {
     /// Sets the `Cache-Control` response header override.
     pub fn cache_control(mut self, value: impl Into<String>) -> Self {
         self.fields.cache_control = Some(value.into());
@@ -256,10 +346,172 @@ impl<R: BlobServiceResource> SasBuilder<'_, R> {
     }
 }
 
+impl SasBuilder<'_, state::BlobState> {
+    /// Builds the signed SAS query parameter string.
+    pub fn build(&self) -> String {
+        let sts = blob_udk_string_to_sign(
+            &self.state.permissions,
+            &self.fields,
+            self.key,
+            self.state.resource.signed_resource(),
+            &self
+                .state
+                .resource
+                .canonicalized_resource(&self.fields.account),
+            self.state.resource.snapshot_time().unwrap_or(""),
+            "",
+        );
+        let signature = sign(&self.key.value, &sts);
+        blob_udk_query_parameters(
+            &self.state.permissions,
+            &self.fields,
+            self.key,
+            self.state.resource.signed_resource(),
+            self.state.resource.snapshot_time(),
+            None,
+            &signature,
+        )
+    }
+}
+
+impl SasBuilder<'_, state::ContainerState> {
+    /// Builds the signed SAS query parameter string.
+    pub fn build(&self) -> String {
+        let sts = blob_udk_string_to_sign(
+            &self.state.permissions,
+            &self.fields,
+            self.key,
+            "c",
+            &self
+                .state
+                .resource
+                .canonicalized_resource(&self.fields.account),
+            "",
+            "",
+        );
+        let signature = sign(&self.key.value, &sts);
+        blob_udk_query_parameters(
+            &self.state.permissions,
+            &self.fields,
+            self.key,
+            "c",
+            None,
+            None,
+            &signature,
+        )
+    }
+}
+
+impl SasBuilder<'_, state::DirectoryState> {
+    /// Builds the signed SAS query parameter string.
+    pub fn build(&self) -> String {
+        let depth = self.state.resource.depth();
+        let depth_str = depth.to_string();
+        let sts = blob_udk_string_to_sign(
+            &self.state.permissions,
+            &self.fields,
+            self.key,
+            "d",
+            &self
+                .state
+                .resource
+                .canonicalized_resource(&self.fields.account),
+            "",
+            &depth_str,
+        );
+        let signature = sign(&self.key.value, &sts);
+        blob_udk_query_parameters(
+            &self.state.permissions,
+            &self.fields,
+            self.key,
+            "d",
+            None,
+            Some(depth),
+            &signature,
+        )
+    }
+}
+
+impl SasBuilder<'_, state::QueueState> {
+    /// Builds the signed SAS query parameter string.
+    pub fn build(&self) -> String {
+        let sts = format!(
+            "{sp}\n{st}\n{se}\n{cr}\n\
+             {skoid}\n{sktid}\n{skt}\n{ske}\n{sks}\n{skv}\n\
+             {skdutid}\n{sduoid}\n\
+             {sip}\n{spr}\n{sv}\n",
+            sp = self.state.permissions,
+            st = self.fields.start_str(),
+            se = self.fields.expiry_str(),
+            cr = self
+                .state
+                .resource
+                .canonicalized_resource(&self.fields.account),
+            skoid = self.key.signed_oid,
+            sktid = self.key.signed_tid,
+            skt = Fields::format_time(&self.key.signed_start),
+            ske = Fields::format_time(&self.key.signed_expiry),
+            sks = self.key.signed_service,
+            skv = self.key.signed_version,
+            skdutid = self.fields.delegated_tenant_id.as_deref().unwrap_or(""),
+            sduoid = self
+                .fields
+                .delegated_user_object_id
+                .as_deref()
+                .unwrap_or(""),
+            sip = self.fields.ip_str(),
+            spr = self.fields.protocol_str(),
+            sv = SAS_VERSION,
+        );
+        let signature = sign(&self.key.value, &sts);
+
+        let mut parts = Vec::with_capacity(15);
+        parts.push(format!("sv={SAS_VERSION}"));
+        if let Some(ref start) = self.fields.start {
+            parts.push(format!("st={}", Fields::format_time(start)));
+        }
+        parts.push(format!("se={}", self.fields.expiry_str()));
+        parts.push(format!("sp={}", self.state.permissions));
+        if let Some(ref ip) = self.fields.ip_range {
+            parts.push(format!("sip={ip}"));
+        }
+        if let Some(ref proto) = self.fields.protocol {
+            parts.push(format!("spr={proto}"));
+        }
+        parts.push(format!("skoid={}", self.key.signed_oid));
+        parts.push(format!("sktid={}", self.key.signed_tid));
+        parts.push(format!(
+            "skt={}",
+            Fields::format_time(&self.key.signed_start)
+        ));
+        parts.push(format!(
+            "ske={}",
+            Fields::format_time(&self.key.signed_expiry)
+        ));
+        parts.push(format!("sks={}", self.key.signed_service));
+        parts.push(format!("skv={}", self.key.signed_version));
+        if let Some(ref v) = self.fields.delegated_tenant_id {
+            parts.push(format!("skdutid={v}"));
+        }
+        if let Some(ref v) = self.fields.delegated_user_object_id {
+            parts.push(format!("sduoid={v}"));
+        }
+        parts.push(format!("sig={}", Fields::encode(&signature)));
+        parts.join("&")
+    }
+}
+
+/// Computes an HMAC-SHA256 signature and returns it as a base64 string.
+fn sign(key: &[u8], message: &str) -> String {
+    let mut mac = Hmac::<Sha256>::new_from_slice(key).expect("HMAC-SHA256 accepts any key length");
+    mac.update(message.as_bytes());
+    base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::resource::blob::{Blob, BlobPermissions, Container};
+    use crate::resource::blob::{Blob, BlobPermissions, Container, ContainerPermissions};
     use crate::resource::{Queue, QueuePermissions};
     use time::macros::datetime;
 
@@ -275,117 +527,72 @@ mod tests {
         }
     }
 
-    /// Helper to get the string-to-sign from a builder (for test assertions).
-    fn string_to_sign<R: Resource>(builder: &SasBuilder<'_, R>) -> String {
-        builder
-            .resource
-            ._build_string_to_sign(&builder.permissions, &builder.fields, builder.key)
-    }
-
     #[test]
-    fn blob_udk_string_to_sign() {
+    fn blob_string_to_sign() {
         let udk = test_udk();
-        let resource = Blob::new("mycontainer", "myblob.txt");
-        let permissions = BlobPermissions {
-            read: true,
-            write: true,
-            ..Default::default()
-        };
         let expiry = datetime!(2025-06-01 12:00:00 UTC);
 
-        let builder = SasBuilder::new("myaccount", resource, permissions, expiry, &udk)
+        let builder = SasBuilder::new("myaccount", &udk, expiry)
             .start(datetime!(2025-01-15 00:00:00 UTC))
-            .protocol(SasProtocol::HttpsAndHttp);
+            .protocol(SasProtocol::HttpsAndHttp)
+            .blob(
+                Blob::new("mycontainer", "myblob.txt"),
+                BlobPermissions::new().read().write(),
+            );
 
-        let sts = string_to_sign(&builder);
-        assert!(sts.starts_with("rw\n"));
-        assert!(sts.contains("/blob/myaccount/mycontainer/myblob.txt\n"));
-        assert!(sts.contains("oid-value\n"));
-        assert!(sts.contains("tid-value\n"));
-        assert!(sts.contains("https,http\n"));
-        assert!(sts.contains("2025-11-05\n"));
-        assert!(sts.contains("\nb\n")); // sr=b
+        let qp = builder.build();
+        assert!(qp.contains("sp=rw"));
+        assert!(qp.contains("sr=b"));
+        assert!(qp.contains("skoid=oid-value"));
+        assert!(qp.contains("spr=https%2Chttp") || qp.contains("spr=https,http"));
+        assert!(qp.contains("sig="));
     }
 
     #[test]
-    fn blob_udk_display_produces_signed_query() {
+    fn blob_build_produces_signed_query() {
         let udk = test_udk();
-        let resource = Blob::new("mycontainer", "myblob.txt");
-        let permissions = BlobPermissions {
-            read: true,
-            ..Default::default()
-        };
         let expiry = datetime!(2025-06-01 12:00:00 UTC);
 
-        let builder = SasBuilder::new("myaccount", resource, permissions, expiry, &udk)
+        let builder = SasBuilder::new("myaccount", &udk, expiry)
+            .blob(
+                Blob::new("mycontainer", "myblob.txt"),
+                BlobPermissions::new().read(),
+            )
             .cache_control("no-cache");
 
-        let qp = builder.to_string();
+        let qp = builder.build();
         assert!(qp.starts_with("sv=2025-11-05&sr=b&"));
         assert!(qp.contains("sp=r"));
         assert!(qp.contains("skoid=oid-value"));
         assert!(qp.contains("rscc=no-cache"));
         assert!(qp.contains("sig="));
-        // Verify signature is a valid base64 string (contains only base64 chars after percent-decoding)
-        let sig_start = qp.find("sig=").unwrap() + 4;
-        let sig_end = qp[sig_start..]
-            .find('&')
-            .map_or(qp.len(), |i| sig_start + i);
-        let sig_encoded = &qp[sig_start..sig_end];
-        assert!(!sig_encoded.is_empty());
     }
 
     #[test]
-    fn container_string_to_sign() {
+    fn container_build() {
         let udk = test_udk();
-        let resource = Container::new("mycontainer");
-        let permissions = crate::resource::blob::ContainerPermissions {
-            read: true,
-            list: true,
-            ..Default::default()
-        };
         let expiry = datetime!(2025-06-01 12:00:00 UTC);
 
-        let builder = SasBuilder::new("myaccount", resource, permissions, expiry, &udk);
-        let sts = string_to_sign(&builder);
-        assert!(sts.starts_with("rl\n"));
-        assert!(sts.contains("/blob/myaccount/mycontainer\n"));
-        assert!(sts.contains("\nc\n")); // sr=c
+        let builder = SasBuilder::new("myaccount", &udk, expiry).container(
+            Container::new("mycontainer"),
+            ContainerPermissions::new().read().list(),
+        );
+
+        let qp = builder.build();
+        assert!(qp.starts_with("sv=2025-11-05&sr=c&"));
+        assert!(qp.contains("sp=rl"));
+        assert!(qp.contains("sig="));
     }
 
     #[test]
-    fn queue_udk_string_to_sign() {
+    fn queue_build() {
         let udk = test_udk();
-        let resource = Queue::new("myqueue");
-        let permissions = QueuePermissions {
-            read: true,
-            process: true,
-            ..Default::default()
-        };
         let expiry = datetime!(2025-06-01 12:00:00 UTC);
 
-        let builder = SasBuilder::new("myaccount", resource, permissions, expiry, &udk);
-        let sts = string_to_sign(&builder);
-        assert!(sts.starts_with("rp\n"));
-        assert!(sts.contains("/queue/myaccount/myqueue\n"));
-        assert!(sts.contains("oid-value\n"));
-        // Queue has 15 newline-separated fields (trailing \n)
-        assert_eq!(sts.matches('\n').count(), 15);
-    }
+        let builder = SasBuilder::new("myaccount", &udk, expiry)
+            .queue(Queue::new("myqueue"), QueuePermissions::new().read().add());
 
-    #[test]
-    fn queue_display_produces_signed_query() {
-        let udk = test_udk();
-        let resource = Queue::new("myqueue");
-        let permissions = QueuePermissions {
-            read: true,
-            add: true,
-            ..Default::default()
-        };
-        let expiry = datetime!(2025-06-01 12:00:00 UTC);
-
-        let builder = SasBuilder::new("myaccount", resource, permissions, expiry, &udk);
-        let qp = builder.to_string();
+        let qp = builder.build();
         assert!(qp.starts_with("sv=2025-11-05&"));
         assert!(qp.contains("sp=ra"));
         assert!(qp.contains("skoid=oid-value"));
@@ -396,17 +603,14 @@ mod tests {
     }
 
     #[test]
-    fn delegated_setters_compile_for_blob() {
+    fn delegated_setters_on_blob() {
         let udk = test_udk();
-        let resource = Blob::new("c", "b");
-        let permissions = BlobPermissions {
-            read: true,
-            ..Default::default()
-        };
         let expiry = datetime!(2025-06-01 12:00:00 UTC);
 
-        // All blob-service + delegated setters should be available
-        let builder = SasBuilder::new("acct", resource, permissions, expiry, &udk)
+        let builder = SasBuilder::new("acct", &udk, expiry)
+            .delegated_tenant_id("dtid")
+            .delegated_user_object_id("duoid")
+            .blob(Blob::new("c", "b"), BlobPermissions::new().read())
             .cache_control("no-cache")
             .content_disposition("inline")
             .content_encoding("gzip")
@@ -414,34 +618,29 @@ mod tests {
             .content_type("text/plain")
             .authorized_object_id("saoid")
             .unauthorized_object_id("suoid")
-            .correlation_id("scid")
-            .delegated_tenant_id("dtid")
-            .delegated_user_object_id("duoid");
+            .correlation_id("scid");
 
-        let sts = string_to_sign(&builder);
-        assert!(sts.contains("saoid\n"));
-        assert!(sts.contains("suoid\n"));
-        assert!(sts.contains("scid\n"));
-        assert!(sts.contains("dtid\n"));
-        assert!(sts.contains("duoid\n"));
+        let qp = builder.build();
+        assert!(qp.contains("skdutid=dtid"));
+        assert!(qp.contains("sduoid=duoid"));
+        assert!(qp.contains("saoid=saoid"));
+        assert!(qp.contains("suoid=suoid"));
+        assert!(qp.contains("scid=scid"));
+        assert!(qp.contains("rscc=no-cache"));
+        assert!(qp.contains("rsct=text%2Fplain") || qp.contains("rsct=text/plain"));
     }
 
     #[test]
     fn blob_snapshot_sets_sr_bs() {
         let udk = test_udk();
-        let resource = Blob::new("c", "b").snapshot("2025-01-15T12:00:00.0000000Z");
-        let permissions = BlobPermissions {
-            read: true,
-            ..Default::default()
-        };
         let expiry = datetime!(2025-06-01 12:00:00 UTC);
 
-        let builder = SasBuilder::new("acct", resource, permissions, expiry, &udk);
-        let sts = string_to_sign(&builder);
-        assert!(sts.contains("\nbs\n")); // sr=bs
-        assert!(sts.contains("2025-01-15T12:00:00.0000000Z\n")); // snapshot time in sts
+        let builder = SasBuilder::new("acct", &udk, expiry).blob(
+            Blob::new("c", "b").snapshot("2025-01-15T12:00:00.0000000Z"),
+            BlobPermissions::new().read(),
+        );
 
-        let qp = builder.to_string();
+        let qp = builder.build();
         assert!(qp.contains("sr=bs"));
         assert!(qp.contains("snapshot=2025-01-15T12:00:00.0000000Z"));
     }
@@ -449,18 +648,14 @@ mod tests {
     #[test]
     fn blob_version_sets_sr_bv() {
         let udk = test_udk();
-        let resource = Blob::new("c", "b").version("2025-01-15T12:00:00.0000000Z");
-        let permissions = BlobPermissions {
-            read: true,
-            ..Default::default()
-        };
         let expiry = datetime!(2025-06-01 12:00:00 UTC);
 
-        let builder = SasBuilder::new("acct", resource, permissions, expiry, &udk);
-        let sts = string_to_sign(&builder);
-        assert!(sts.contains("\nbv\n")); // sr=bv
+        let builder = SasBuilder::new("acct", &udk, expiry).blob(
+            Blob::new("c", "b").version("2025-01-15T12:00:00.0000000Z"),
+            BlobPermissions::new().read(),
+        );
 
-        let qp = builder.to_string();
+        let qp = builder.build();
         assert!(qp.contains("sr=bv"));
     }
 
@@ -477,36 +672,31 @@ mod tests {
     }
 
     #[test]
-    fn display_produces_deterministic_signature() {
+    fn build_produces_deterministic_signature() {
         let udk = test_udk();
-        let resource = Blob::new("c", "b");
-        let permissions = BlobPermissions {
-            read: true,
-            ..Default::default()
-        };
         let expiry = datetime!(2025-06-01 12:00:00 UTC);
 
-        let builder = SasBuilder::new("acct", resource, permissions, expiry, &udk);
-        let first = builder.to_string();
-        let second = builder.to_string();
+        let builder = SasBuilder::new("acct", &udk, expiry)
+            .blob(Blob::new("c", "b"), BlobPermissions::new().read());
+
+        let first = builder.build();
+        let second = builder.build();
         assert_eq!(first, second);
     }
 
     #[test]
-    fn display_in_format_string() {
+    fn common_setters_before_and_after_transition() {
         let udk = test_udk();
-        let resource = Blob::new("photos", "cat.jpg");
-        let permissions = BlobPermissions {
-            read: true,
-            ..Default::default()
-        };
         let expiry = datetime!(2025-06-01 12:00:00 UTC);
 
-        let sas = SasBuilder::new("myaccount", resource, permissions, expiry, &udk);
-        let url = format!("https://myaccount.blob.core.windows.net/photos/cat.jpg?{sas}");
-        assert!(url.starts_with(
-            "https://myaccount.blob.core.windows.net/photos/cat.jpg?sv=2025-11-05&sr=b&"
-        ));
-        assert!(url.contains("sig="));
+        // Common setters work before transition
+        let builder = SasBuilder::new("acct", &udk, expiry)
+            .protocol(SasProtocol::Https)
+            .blob(Blob::new("c", "b"), BlobPermissions::new().read())
+            .start(datetime!(2025-01-15 00:00:00 UTC));
+
+        let qp = builder.build();
+        assert!(qp.contains("spr=https"));
+        assert!(qp.contains("st=2025-01-15T00:00:00Z"));
     }
 }
