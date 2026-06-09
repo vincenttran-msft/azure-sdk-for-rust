@@ -19,8 +19,8 @@ use super::{
     CopyStatus, ImmutabilityPolicyMode, LeaseDuration, LeaseState, LeaseStatus,
     PageBlobClientClearPagesResult, PageBlobClientCreateResult, PageBlobClientResizeResult,
     PageBlobClientSetSequenceNumberResult, PageBlobClientUploadPagesFromUrlResult,
-    PageBlobClientUploadPagesResult, PublicAccessType, RehydratePriority, SignedIdentifiers,
-    SkuName,
+    PageBlobClientUploadPagesResult, PageList, PublicAccessType, RehydratePriority,
+    SignedIdentifiers, SkuName,
 };
 use azure_core::{
     base64,
@@ -100,6 +100,7 @@ const REQUEST_SERVER_ENCRYPTED: HeaderName =
     HeaderName::from_static("x-ms-request-server-encrypted");
 const SERVER_ENCRYPTED: HeaderName = HeaderName::from_static("x-ms-server-encrypted");
 const SKU_NAME: HeaderName = HeaderName::from_static("x-ms-sku-name");
+const SMART_ACCESS_TIER: HeaderName = HeaderName::from_static("x-ms-smart-access-tier");
 const SNAPSHOT: HeaderName = HeaderName::from_static("x-ms-snapshot");
 const TAG_COUNT: HeaderName = HeaderName::from_static("x-ms-tag-count");
 const VERSION_ID: HeaderName = HeaderName::from_static("x-ms-version-id");
@@ -990,6 +991,7 @@ pub trait BlobClientGetPropertiesResultHeaders: private::Sealed {
     fn object_replication_policy_id(&self) -> Result<Option<String>>;
     fn rehydrate_priority(&self) -> Result<Option<RehydratePriority>>;
     fn is_server_encrypted(&self) -> Result<Option<bool>>;
+    fn smart_access_tier(&self) -> Result<Option<String>>;
     fn tag_count(&self) -> Result<Option<i64>>;
     fn version_id(&self) -> Result<Option<String>>;
 }
@@ -1229,6 +1231,11 @@ impl BlobClientGetPropertiesResultHeaders for Response<BlobClientGetPropertiesRe
     /// Indicates whether the contents of the request are successfully encrypted.
     fn is_server_encrypted(&self) -> Result<Option<bool>> {
         Headers::get_optional_as(self.headers(), &SERVER_ENCRYPTED)
+    }
+
+    /// The underlying tier of a smart tier blob. Only returned if the blob is in Smart tier.
+    fn smart_access_tier(&self) -> Result<Option<String>> {
+        Headers::get_optional_as(self.headers(), &SMART_ACCESS_TIER)
     }
 
     /// The number of tags associated with the blob.
@@ -2561,6 +2568,53 @@ impl PageBlobClientUploadPagesResultHeaders
     }
 }
 
+/// Provides access to typed response headers for `PageBlobClient::get_page_ranges()`
+///
+/// # Examples
+///
+/// ```no_run
+/// use azure_core::{Result, http::{Response, XmlFormat}};
+/// use azure_storage_blob::models::{PageList, PageListHeaders};
+/// async fn example() -> Result<()> {
+///     let response: Response<PageList, XmlFormat> = unimplemented!();
+///     // Access response headers
+///     if let Some(etag) = response.etag()? {
+///         println!("etag: {:?}", etag);
+///     }
+///     if let Some(last_modified) = response.last_modified()? {
+///         println!("last-modified: {:?}", last_modified);
+///     }
+///     if let Some(blob_content_length) = response.blob_content_length()? {
+///         println!("x-ms-blob-content-length: {:?}", blob_content_length);
+///     }
+///     Ok(())
+/// }
+/// ```
+pub trait PageListHeaders: private::Sealed {
+    fn etag(&self) -> Result<Option<Etag>>;
+    fn last_modified(&self) -> Result<Option<OffsetDateTime>>;
+    fn blob_content_length(&self) -> Result<Option<i64>>;
+}
+
+impl PageListHeaders for Response<PageList, XmlFormat> {
+    /// An opaque identifier for the current state of the resource.
+    fn etag(&self) -> Result<Option<Etag>> {
+        Headers::get_optional_as(self.headers(), &ETAG)
+    }
+
+    /// The date-time that the resource was last modified.
+    fn last_modified(&self) -> Result<Option<OffsetDateTime>> {
+        Headers::get_optional_with(self.headers(), &LAST_MODIFIED, |h| {
+            parse_rfc7231(h.as_str())
+        })
+    }
+
+    /// The size of the blob in bytes.
+    fn blob_content_length(&self) -> Result<Option<i64>> {
+        Headers::get_optional_as(self.headers(), &BLOB_CONTENT_LENGTH)
+    }
+}
+
 /// Provides access to typed response headers for `BlobContainerClient::get_access_policy()`
 ///
 /// # Examples
@@ -2624,7 +2678,7 @@ mod private {
         BlockBlobClientUploadInternalResult, BlockList, PageBlobClientClearPagesResult,
         PageBlobClientCreateResult, PageBlobClientResizeResult,
         PageBlobClientSetSequenceNumberResult, PageBlobClientUploadPagesFromUrlResult,
-        PageBlobClientUploadPagesResult, SignedIdentifiers,
+        PageBlobClientUploadPagesResult, PageList, SignedIdentifiers,
     };
     use azure_core::http::{AsyncResponse, NoFormat, Response, XmlFormat};
 
@@ -2663,5 +2717,6 @@ mod private {
     impl Sealed for Response<PageBlobClientSetSequenceNumberResult, NoFormat> {}
     impl Sealed for Response<PageBlobClientUploadPagesFromUrlResult, NoFormat> {}
     impl Sealed for Response<PageBlobClientUploadPagesResult, NoFormat> {}
+    impl Sealed for Response<PageList, XmlFormat> {}
     impl Sealed for Response<SignedIdentifiers, XmlFormat> {}
 }

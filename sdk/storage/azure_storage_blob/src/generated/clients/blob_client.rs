@@ -845,6 +845,7 @@ impl BlobClient {
     /// * [`object_replication_policy_id`()](crate::generated::models::BlobClientGetPropertiesResultHeaders::object_replication_policy_id) - x-ms-or-policy-id
     /// * [`rehydrate_priority`()](crate::generated::models::BlobClientGetPropertiesResultHeaders::rehydrate_priority) - x-ms-rehydrate-priority
     /// * [`is_server_encrypted`()](crate::generated::models::BlobClientGetPropertiesResultHeaders::is_server_encrypted) - x-ms-server-encrypted
+    /// * [`smart_access_tier`()](crate::generated::models::BlobClientGetPropertiesResultHeaders::smart_access_tier) - x-ms-smart-access-tier
     /// * [`tag_count`()](crate::generated::models::BlobClientGetPropertiesResultHeaders::tag_count) - x-ms-tag-count
     /// * [`version_id`()](crate::generated::models::BlobClientGetPropertiesResultHeaders::version_id) - x-ms-version-id
     ///
@@ -1574,7 +1575,7 @@ impl BlobClient {
 }
 
 /// Default value for [`BlobClientOptions::version`].
-pub(crate) const DEFAULT_VERSION: &str = "2026-04-06";
+pub(crate) const DEFAULT_VERSION: &str = "2026-06-06";
 
 impl Default for BlobClientOptions {
     fn default() -> Self {

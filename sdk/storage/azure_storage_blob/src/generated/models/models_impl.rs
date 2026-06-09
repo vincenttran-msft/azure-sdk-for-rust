@@ -5,7 +5,8 @@
 
 use super::{
     BlobItem, BlobServiceProperties, BlobTags, BlockLookupList, ContainerItem, FilterBlobItem,
-    FilteredBlobResponse, ListBlobsResponse, ListContainersResponse, SignedIdentifiers,
+    FilteredBlobResponse, ListBlobsHierarchicalResponse, ListBlobsResponse, ListContainersResponse,
+    PageList, PageRange, SignedIdentifiers,
 };
 use async_trait::async_trait;
 use azure_core::{
@@ -24,6 +25,15 @@ impl Page for FilteredBlobResponse {
 }
 
 #[async_trait]
+impl Page for ListBlobsHierarchicalResponse {
+    type Item = BlobItem;
+    type IntoIter = <Vec<BlobItem> as IntoIterator>::IntoIter;
+    async fn into_items(self) -> Result<Self::IntoIter> {
+        Ok(self.hierarchical_list.blob_items.into_iter())
+    }
+}
+
+#[async_trait]
 impl Page for ListBlobsResponse {
     type Item = BlobItem;
     type IntoIter = <Vec<BlobItem> as IntoIterator>::IntoIter;
@@ -38,6 +48,15 @@ impl Page for ListContainersResponse {
     type IntoIter = <Vec<ContainerItem> as IntoIterator>::IntoIter;
     async fn into_items(self) -> Result<Self::IntoIter> {
         Ok(self.container_items.into_iter())
+    }
+}
+
+#[async_trait]
+impl Page for PageList {
+    type Item = PageRange;
+    type IntoIter = <Vec<PageRange> as IntoIterator>::IntoIter;
+    async fn into_items(self) -> Result<Self::IntoIter> {
+        Ok(self.page_range.into_iter())
     }
 }
 
