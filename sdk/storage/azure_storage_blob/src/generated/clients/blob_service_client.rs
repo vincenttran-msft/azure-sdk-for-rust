@@ -396,7 +396,7 @@ impl BlobServiceClient {
 }
 
 /// Default value for [`BlobServiceClientOptions::version`].
-pub(crate) const DEFAULT_VERSION: &str = "2026-06-06";
+pub(crate) const DEFAULT_VERSION: &str = "2026-10-06";
 
 impl Default for BlobServiceClientOptions {
     fn default() -> Self {

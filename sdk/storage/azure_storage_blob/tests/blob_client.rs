@@ -1621,3 +1621,33 @@ async fn test_commit_block_list_smart_access_tier(ctx: TestContext) -> Result<()
     container_client.delete(None).await?;
     Ok(())
 }
+
+#[recorded::test]
+async fn test_download_access_tier_properties(ctx: TestContext) -> Result<(), Box<dyn Error>> {
+    // Recording Setup
+    let recording = ctx.recording();
+    let container_client =
+        get_container_client(recording, true, StorageAccount::Standard, None).await?;
+    let blob_client = container_client.blob_client(&get_blob_name(recording));
+
+    // Upload Blob and Set Smart Tier
+    blob_client
+        .upload(RequestContent::from(b"smart tier download".to_vec()), None)
+        .await?;
+    blob_client.set_tier(AccessTier::Smart, None).await?;
+
+    // Assert via download
+    let response = blob_client.download(None).await?;
+    assert_eq!(
+        Some(AccessTier::Smart.to_string()),
+        response.properties.access_tier
+    );
+    assert!(response.properties.smart_access_tier.is_some());
+    assert!(response.properties.access_tier_changed_on.is_some());
+    // Service omits x-ms-access-tier-inferred when the tier is explicitly set,
+    // returning the header only when the tier is inferred.
+    assert!(!response.properties.access_tier_inferred.unwrap_or(false));
+
+    container_client.delete(None).await?;
+    Ok(())
+}

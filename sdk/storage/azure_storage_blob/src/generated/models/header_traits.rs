@@ -629,6 +629,9 @@ pub(crate) trait BlobClientDownloadInternalResultHeaders: private::Sealed {
     fn content_range(&self) -> Result<Option<String>>;
     fn etag(&self) -> Result<Option<Etag>>;
     fn last_modified(&self) -> Result<Option<OffsetDateTime>>;
+    fn access_tier(&self) -> Result<Option<String>>;
+    fn access_tier_change_time(&self) -> Result<Option<OffsetDateTime>>;
+    fn access_tier_inferred(&self) -> Result<Option<bool>>;
     fn blob_committed_block_count(&self) -> Result<Option<i32>>;
     fn blob_content_md5(&self) -> Result<Option<Vec<u8>>>;
     fn is_sealed(&self) -> Result<Option<bool>>;
@@ -656,6 +659,7 @@ pub(crate) trait BlobClientDownloadInternalResultHeaders: private::Sealed {
     fn object_replication_rules(&self) -> Result<HashMap<String, String>>;
     fn object_replication_policy_id(&self) -> Result<Option<String>>;
     fn is_server_encrypted(&self) -> Result<Option<bool>>;
+    fn smart_access_tier(&self) -> Result<Option<String>>;
     fn tag_count(&self) -> Result<Option<i64>>;
     fn version_id(&self) -> Result<Option<String>>;
 }
@@ -706,6 +710,23 @@ impl BlobClientDownloadInternalResultHeaders for AsyncResponse<BlobClientDownloa
         Headers::get_optional_with(self.headers(), &LAST_MODIFIED, |h| {
             parse_rfc7231(h.as_str())
         })
+    }
+
+    /// The access tier of the blob.
+    fn access_tier(&self) -> Result<Option<String>> {
+        Headers::get_optional_as(self.headers(), &ACCESS_TIER)
+    }
+
+    /// The time the tier was changed on the blob. This is only returned if the tier on the blob was ever set.
+    fn access_tier_change_time(&self) -> Result<Option<OffsetDateTime>> {
+        Headers::get_optional_with(self.headers(), &ACCESS_TIER_CHANGE_TIME, |h| {
+            parse_rfc7231(h.as_str())
+        })
+    }
+
+    /// Included if the access tier is inferred.
+    fn access_tier_inferred(&self) -> Result<Option<bool>> {
+        Headers::get_optional_as(self.headers(), &ACCESS_TIER_INFERRED)
     }
 
     /// The number of committed blocks present in the blob.
@@ -868,6 +889,11 @@ impl BlobClientDownloadInternalResultHeaders for AsyncResponse<BlobClientDownloa
     /// Indicates whether the contents of the request are successfully encrypted.
     fn is_server_encrypted(&self) -> Result<Option<bool>> {
         Headers::get_optional_as(self.headers(), &SERVER_ENCRYPTED)
+    }
+
+    /// The underlying tier of a smart tier blob. Only returned if the blob is in Smart tier.
+    fn smart_access_tier(&self) -> Result<Option<String>> {
+        Headers::get_optional_as(self.headers(), &SMART_ACCESS_TIER)
     }
 
     /// The number of tags associated with the blob.

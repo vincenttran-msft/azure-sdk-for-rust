@@ -4,6 +4,8 @@
 
 ### Features Added
 
+- Added `access_tier`, `access_tier_changed_on`, `access_tier_inferred`, and `smart_access_tier` to `BlobDownloadProperties`.
+
 ### Breaking Changes
 
 ### Bugs Fixed
