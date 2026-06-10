@@ -4,6 +4,8 @@
 
 ### Features Added
 
+- Added Smart access tier support: `AccessTier::Smart`, `ArchiveStatus::RehydratePendingToSmart`, `smart_access_tier` field on `BlobProperties`, and `tier` option on `BlockBlobClientCommitBlockListOptions`.
+
 ### Breaking Changes
 
 ### Bugs Fixed
