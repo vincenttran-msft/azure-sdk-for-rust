@@ -5,12 +5,15 @@
 ### Features Added
 
 - Added `access_tier`, `access_tier_changed_on`, `access_tier_inferred`, and `smart_access_tier` to `BlobDownloadProperties`.
+- Added `content_crc64` to `BlockBlobClientUploadBlobFromUrlResultHeaders`.
 
 ### Breaking Changes
 
 ### Bugs Fixed
 
 ### Other Changes
+
+- Updated the default service version to `2026-10-06`.
 
 ## 1.0.0 (2026-05-13)
 

@@ -6,7 +6,8 @@ use azure_core_test::{recorded, TestContext};
 use azure_storage_blob::models::{
     BlobClientGetPropertiesResultHeaders, BlobType, HttpRange, PageBlobClientCreateOptions,
     PageBlobClientSetSequenceNumberOptions, PageBlobClientSetSequenceNumberResultHeaders,
-    PageBlobClientUploadPagesFromUrlOptions, PageBlobClientUploadPagesOptions,
+    PageBlobClientUploadPagesFromUrlOptions, PageBlobClientUploadPagesFromUrlResultHeaders,
+    PageBlobClientUploadPagesOptions, PageBlobClientUploadPagesResultHeaders,
     SequenceNumberActionType,
 };
 use azure_storage_blob_test::{get_blob_name, get_container_client, StorageAccount};
@@ -241,7 +242,7 @@ async fn test_upload_page_from_url(ctx: TestContext) -> Result<(), Box<dyn Error
             None,
         )
         .await?;
-    page_blob_client_2
+    let upload_response = page_blob_client_2
         .upload_pages_from_url(
             blob_client_1.url().as_str().into(),
             HttpRange::new(0, data_b.len() as u64),
@@ -252,6 +253,8 @@ async fn test_upload_page_from_url(ctx: TestContext) -> Result<(), Box<dyn Error
         .await?;
 
     // Assert
+    assert!(upload_response.content_crc64()?.is_some());
+
     let response = blob_client_2.download(None).await?;
     assert_eq!(1024, response.properties.content_length.unwrap());
     data_a.extend(&data_b);
@@ -461,7 +464,7 @@ async fn test_upload_pages_transactional_checksums(ctx: TestContext) -> Result<(
     );
 
     // MD5 Match Scenario
-    page_blob_client
+    let response = page_blob_client
         .upload_pages(
             RequestContent::from(data.clone()),
             512,
@@ -472,6 +475,8 @@ async fn test_upload_pages_transactional_checksums(ctx: TestContext) -> Result<(
             }),
         )
         .await?;
+    assert!(response.content_md5()?.is_some());
+    assert!(response.content_crc64()?.is_some());
 
     // CRC64 Mismatch Scenario
     let response = page_blob_client
@@ -491,7 +496,7 @@ async fn test_upload_pages_transactional_checksums(ctx: TestContext) -> Result<(
     );
 
     // CRC64 Match Scenario
-    page_blob_client
+    let response = page_blob_client
         .upload_pages(
             RequestContent::from(data.clone()),
             512,
@@ -502,6 +507,7 @@ async fn test_upload_pages_transactional_checksums(ctx: TestContext) -> Result<(
             }),
         )
         .await?;
+    assert!(response.content_crc64()?.is_some());
 
     // No Checksum Scenario
     page_blob_client
