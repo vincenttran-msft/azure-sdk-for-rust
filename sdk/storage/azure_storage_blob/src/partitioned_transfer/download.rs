@@ -150,6 +150,7 @@ where
 }
 
 pub(crate) async fn download_into<Behavior>(
+    // Whole destination buffer of contiguous memory that allows for the performance gain
     buffer: &mut [u8],
     range: Option<HttpRange>,
     parallel: NonZero<usize>,
@@ -169,6 +170,7 @@ where
         )
     };
 
+    // Pull range, deserialize from HttpRange -> Range
     let range: Option<Range<usize>> = range.map(|hr| {
         let start = hr.offset() as usize;
         let end = match hr.length() {
@@ -180,6 +182,7 @@ where
     let parallel = parallel.get();
     let partition_size = partition_size.get();
 
+    // Get first ranged GET request, parse Content-Range to determine blob total size or None [no Content-Range --> None --> whole blob fit in single buffer]
     let (initial_response, response_analysis) =
         get_initial_response_and_analyze(range, partition_size, client.clone()).await?;
 
@@ -187,6 +190,7 @@ where
     let headers = initial_response.headers().clone();
     let etag_lock = headers.get_optional_str(&"etag".into()).map(Etag::from);
 
+    // Fits in one GET scenario
     // if no response analysis, no subsequent gets, therefore just copy to buffer and return
     let Some(mut response_analysis) = response_analysis else {
         return initial_response
@@ -201,6 +205,7 @@ where
         return Err(insufficient_buffer_err());
     }
 
+    // Catches sequential case explicitly here for efficiency
     // if no real parallelism, just sequentially go through the ranges and write to buffer
     if parallel == 1 {
         let mut total_read = initial_response.into_body().collect_into(buffer).await?;
@@ -234,6 +239,7 @@ where
         // bytes at this position are written to position 0 of `buffer`
         let src_offset = response_analysis.overall_download_range.start;
 
+        // Add on initial worker, hence why hard-coded to 0 offset
         let mut download_workers = Vec::with_capacity(parallel);
         download_workers.push(start_initial_download_task_channel(
             initial_response,
@@ -241,26 +247,37 @@ where
             tx.clone(),
         ));
 
+        // Pop off the next download range, if any
         while let Some(range) = response_analysis.remaining_download_ranges.pop_front() {
+            // If we hit maximum concurrency, wait until one worker finishes
+            // select_all is what blocks until one returns
             while download_workers.len() >= parallel {
                 (_, _, download_workers) = future::select_all(download_workers).await;
             }
+
+            // Spawn new worker for given range for current loop iteration
             download_workers.push(start_download_task_channel(
                 client.clone(),
                 range.clone(),
-                range.start - src_offset,
+                range.start - src_offset, // Offset to account for the buffer relative position (more relevant for sub-ranges)
                 etag_lock.clone(),
                 tx.clone(),
             ));
         }
+        // Propagates failures up
         if let Err(error) = future::try_join_all(download_workers).await {
             _ = tx.send(Err(map_spawned_task_error(error))).await;
         }
     }));
+    // Main speedup derived from not having to re-sequence the chunks in the case of workers returning out of order +
+    // less memory allocation of a bunch of small partition buffers, instead just writing straight to the destination
 
     let mut total_read = 0;
+    // Pull next ready bytes to write to buffer
     while let Ok(msg) = rx.recv().await {
         let (write_offset, bytes) = msg?;
+
+        // Check for data larger than buffer error
         if write_offset
             .checked_add(bytes.len())
             .ok_or_else(insufficient_buffer_err)?
@@ -268,10 +285,13 @@ where
         {
             return Err(insufficient_buffer_err());
         }
+        // Otherwise write to buffer directly at the right spot
         buffer[write_offset..write_offset + bytes.len()].copy_from_slice(&bytes);
+        // Increment counter
         total_read += bytes.len();
     }
 
+    // Compare our accumulated value against what was returned in initial GET Content-Range
     let expected_total_read = response_analysis.overall_download_range.len();
     if expected_total_read != total_read {
         return Err(missing_bytes_err(expected_total_read, total_read));
