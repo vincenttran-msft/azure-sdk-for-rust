@@ -239,6 +239,61 @@ async fn test_download_blob(ctx: TestContext) -> Result<(), Box<dyn Error>> {
 }
 
 #[recorded::test]
+async fn test_download_blob_ranged_checksums(ctx: TestContext) -> Result<(), Box<dyn Error>> {
+    // Recording Setup
+    let recording = ctx.recording();
+    let container_client =
+        get_container_client(recording, true, StorageAccount::Standard, None).await?;
+    let blob_client = container_client.blob_client(&get_blob_name(recording));
+    let data = b"hello rusty world";
+
+    blob_client
+        .upload(RequestContent::from(data.to_vec()), None)
+        .await?;
+
+    // Range Download with CRC64 Scenario
+    let response = blob_client
+        .download(Some(BlobClientDownloadOptions {
+            range: Some((0..17u64).into()),
+            range_get_content_crc64: Some(true),
+            ..Default::default()
+        }))
+        .await?;
+    assert!(response.properties.content_crc64.is_some());
+    assert!(response.properties.content_md5.is_none());
+    let body_data = response.body.collect().await?;
+    assert_eq!(data.as_ref(), &body_data[..]);
+
+    // Range Download with MD5 Scenario
+    let response = blob_client
+        .download(Some(BlobClientDownloadOptions {
+            range: Some((0..17u64).into()),
+            range_get_content_md5: Some(true),
+            ..Default::default()
+        }))
+        .await?;
+    assert!(response.properties.content_md5.is_some());
+    assert!(response.properties.content_crc64.is_none());
+    let body_data = response.body.collect().await?;
+    assert_eq!(data.as_ref(), &body_data[..]);
+
+    // Range Download without Checksum Scenario (neither requested, partial range)
+    let response = blob_client
+        .download(Some(BlobClientDownloadOptions {
+            range: Some((0..10u64).into()),
+            ..Default::default()
+        }))
+        .await?;
+    assert!(response.properties.content_crc64.is_none());
+    assert!(response.properties.content_md5.is_none());
+    let body_data = response.body.collect().await?;
+    assert_eq!(&data[..10], &body_data[..]);
+
+    container_client.delete(None).await?;
+    Ok(())
+}
+
+#[recorded::test]
 async fn test_set_blob_metadata(ctx: TestContext) -> Result<(), Box<dyn Error>> {
     // Recording Setup
 

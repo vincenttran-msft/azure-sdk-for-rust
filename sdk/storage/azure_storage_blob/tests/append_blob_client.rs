@@ -345,6 +345,7 @@ async fn test_append_block_transactional_checksums(ctx: TestContext) -> Result<(
         )
         .await?;
     assert!(response.content_crc64()?.is_some());
+    assert!(response.content_md5()?.is_none());
 
     container_client.delete(None).await?;
     Ok(())

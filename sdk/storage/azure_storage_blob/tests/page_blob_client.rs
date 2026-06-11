@@ -508,6 +508,7 @@ async fn test_upload_pages_transactional_checksums(ctx: TestContext) -> Result<(
         )
         .await?;
     assert!(response.content_crc64()?.is_some());
+    assert!(response.content_md5()?.is_none());
 
     // No Checksum Scenario
     page_blob_client
