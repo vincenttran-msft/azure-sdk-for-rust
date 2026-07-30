@@ -96,6 +96,10 @@ pub struct BlobClientReleaseLeaseResult;
 #[derive(SafeDebug)]
 pub struct BlobClientRenewLeaseResult;
 
+/// Contains results for `BlobClient::start_copy_from_url()`
+#[derive(SafeDebug)]
+pub struct BlobClientStartCopyFromUrlResult;
+
 /// Contains results for `BlobContainerClient::acquire_lease()`
 #[derive(SafeDebug)]
 pub struct BlobContainerClientAcquireLeaseResult;

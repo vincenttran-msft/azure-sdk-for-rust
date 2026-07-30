@@ -17,9 +17,10 @@ use azure_storage_blob::{
         BlobClientDownloadOptions, BlobClientGetAccountInfoResultHeaders,
         BlobClientGetPropertiesOptions, BlobClientGetPropertiesResultHeaders,
         BlobClientSetImmutabilityPolicyOptions, BlobClientSetMetadataOptions,
-        BlobClientSetPropertiesOptions, BlobClientSetTierOptions, BlobTags,
-        BlockBlobClientCommitBlockListOptions, BlockBlobClientUploadOptions,
-        ImmutabilityPolicyMode, LeaseState, RehydratePriority, StorageErrorCode,
+        BlobClientSetPropertiesOptions, BlobClientSetTierOptions,
+        BlobClientStartCopyFromUrlResultHeaders, BlobTags, BlockBlobClientCommitBlockListOptions,
+        BlockBlobClientUploadOptions, CopyStatus, ImmutabilityPolicyMode, LeaseState,
+        RehydratePriority, StorageErrorCode,
     },
     BlobClient, BlobClientOptions, BlobContainerClient, BlobContainerClientOptions, StorageError,
 };
@@ -160,6 +161,61 @@ async fn test_upload_blob(ctx: TestContext) -> Result<(), Box<dyn Error>> {
     assert_eq!(29, response.properties.content_length.unwrap());
     let body_data = response.body.collect().await?;
     assert_eq!(Bytes::from_static(new_data), body_data);
+
+    container_client.delete(None).await?;
+    Ok(())
+}
+
+#[recorded::test]
+async fn test_start_copy_from_url(ctx: TestContext) -> Result<(), Box<dyn Error>> {
+    // Recording Setup
+    let recording = ctx.recording();
+    let container_client =
+        get_container_client(recording, true, StorageAccount::Standard, None).await?;
+    let source_blob_client = container_client.blob_client(&get_blob_name(recording));
+    let destination_blob_client = container_client.blob_client(&get_blob_name(recording));
+    let data = b"hello copied rusty world";
+    create_test_blob(
+        &source_blob_client,
+        Some(RequestContent::from(data.to_vec())),
+        None,
+    )
+    .await?;
+
+    // Start Copy Scenario
+    let response = destination_blob_client
+        .start_copy_from_url(source_blob_client.url().as_str().into(), None)
+        .await?;
+
+    // Assert
+    assert!(response.copy_id()?.is_some());
+    assert!(matches!(
+        response.copy_status()?,
+        Some(CopyStatus::Pending | CopyStatus::Success)
+    ));
+
+    let mut copy_status = None;
+    for _ in 0..10 {
+        copy_status = destination_blob_client
+            .get_properties(None)
+            .await?
+            .copy_status()?;
+        if copy_status != Some(CopyStatus::Pending) {
+            break;
+        }
+        if recording.test_mode() == TestMode::Live || recording.test_mode() == TestMode::Record {
+            time::sleep(Duration::from_secs(1)).await;
+        }
+    }
+    assert_eq!(Some(CopyStatus::Success), copy_status);
+
+    let body = destination_blob_client
+        .download(None)
+        .await?
+        .body
+        .collect()
+        .await?;
+    assert_eq!(data.as_ref(), &body[..]);
 
     container_client.delete(None).await?;
     Ok(())

@@ -830,6 +830,73 @@ pub struct BlobClientSetTierOptions<'a> {
     pub version_id: Option<String>,
 }
 
+/// Options to be passed to `BlobClient::start_copy_from_url()`
+#[derive(Clone, Default, SafeDebug)]
+pub struct BlobClientStartCopyFromUrlOptions<'a> {
+    /// The blob tags.
+    pub blob_tags_string: Option<String>,
+
+    /// Specify this value to operate only on a blob with a matching Etag value.
+    pub if_match: Option<Etag>,
+
+    /// Specify this value to operate only on a blob if it has been modified since the specified date-time.
+    pub if_modified_since: Option<OffsetDateTime>,
+
+    /// Specify this value to operate only on a blob with a non-matching Etag value.
+    pub if_none_match: Option<Etag>,
+
+    /// Specifies a SQL-like where clause on blob tags to operate only on a blob with matching tags.
+    pub if_tags: Option<String>,
+
+    /// Specify this value to operate only on a blob if it has not been modified since the specified date-time.
+    pub if_unmodified_since: Option<OffsetDateTime>,
+
+    /// The date-time that indicates the time at which the blob immutability policy will expire.
+    pub immutability_policy_expiry: Option<OffsetDateTime>,
+
+    /// Indicates the immutability policy mode of the blob.
+    pub immutability_policy_mode: Option<ImmutabilityPolicyMode>,
+
+    /// If specified, the operation only succeeds if the resource's lease is active and matches this ID.
+    pub lease_id: Option<String>,
+
+    /// Indicates whether the blob has a legal hold.
+    pub legal_hold: Option<bool>,
+
+    /// The metadata headers.
+    pub metadata: Option<HashMap<String, String>>,
+
+    /// Allows customization of the method call.
+    pub method_options: ClientMethodOptions<'a>,
+
+    /// The priority of the rehydration operation.
+    pub rehydrate_priority: Option<RehydratePriority>,
+
+    /// Overrides the sealed state of the destination blob.
+    pub seal_blob: Option<bool>,
+
+    /// Specify this value to operate only on a source blob with a matching Etag value.
+    pub source_if_match: Option<Etag>,
+
+    /// Specify this value to operate only on a source blob if it has been modified since the specified date-time.
+    pub source_if_modified_since: Option<OffsetDateTime>,
+
+    /// Specify this value to operate only on a source blob with a non-matching Etag value.
+    pub source_if_none_match: Option<Etag>,
+
+    /// Specifies a SQL-like where clause on blob tags to operate only on a source blob with matching tags.
+    pub source_if_tags: Option<String>,
+
+    /// Specify this header value to operate only on a blob if it has not been modified since the specified date-time.
+    pub source_if_unmodified_since: Option<OffsetDateTime>,
+
+    /// The tier to be set on the blob.
+    pub tier: Option<AccessTier>,
+
+    /// The timeout parameter is expressed in seconds. For more information, see [Setting Timeouts for Blob Service Operations.](\"<https://docs.microsoft.com/en-us/rest/api/storageservices/fileservices/setting-timeouts-for-blob-service-operations\>")
+    pub timeout: Option<i32>,
+}
+
 /// Options to be passed to `BlobClient::undelete()`
 #[derive(Clone, Default, SafeDebug)]
 pub struct BlobClientUndeleteOptions<'a> {
