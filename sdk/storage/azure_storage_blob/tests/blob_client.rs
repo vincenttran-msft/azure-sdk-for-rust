@@ -5,11 +5,14 @@ mod common;
 
 use azure_core::{
     error::ErrorKind,
-    http::{headers::CONTENT_TYPE, ClientOptions, RequestContent, StatusCode, Url},
+    http::{
+        headers::{HeaderName, Headers, CONTENT_TYPE},
+        AsyncRawResponse, ClientOptions, Method, RequestContent, StatusCode, Transport, Url,
+    },
     time::{parse_rfc3339, to_rfc3339, OffsetDateTime},
     Bytes,
 };
-use azure_core_test::{recorded, Matcher, TestContext, TestMode, VarOptions};
+use azure_core_test::{http::MockHttpClient, recorded, Matcher, TestContext, TestMode, VarOptions};
 use azure_storage_blob::{
     models::{
         AccessTier, AccountKind, ArchiveStatus, BlobClientAcquireLeaseOptions,
@@ -30,7 +33,7 @@ use common::{
     ClientOptionsExt, StorageAccount, TestPolicy,
 };
 use flate2::{write::GzEncoder, Compression};
-use futures::TryStreamExt;
+use futures::{FutureExt as _, TryStreamExt};
 use std::{
     cmp::min,
     collections::HashMap,
@@ -218,6 +221,101 @@ async fn test_start_copy_from_url(ctx: TestContext) -> Result<(), Box<dyn Error>
     assert_eq!(data.as_ref(), &body[..]);
 
     container_client.delete(None).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_abort_copy_from_url() -> Result<(), Box<dyn Error>> {
+    const COPY_ID: &str = "9f967724-b60d-4edb-8087-21f18b3b6f42";
+    const COPY_SOURCE: &str = "https://example.com/ferris.txt";
+
+    let mut request_count = 0;
+    let mock_client = Arc::new(MockHttpClient::new(move |request| {
+        request_count += 1;
+        let response = match request_count {
+            1 => {
+                // Start Copy Response
+                assert_eq!(Method::Put, request.method());
+                assert_eq!("/container/blob", request.url().path());
+                assert_eq!(None, request.url().query());
+                assert_eq!(
+                    COPY_SOURCE,
+                    request
+                        .headers()
+                        .get_str(&HeaderName::from_static("x-ms-copy-source"))
+                        .expect("copy source should be present")
+                );
+
+                let mut headers = Headers::new();
+                headers.insert("x-ms-copy-id", COPY_ID);
+                headers.insert("x-ms-copy-status", "pending");
+                AsyncRawResponse::from_bytes(StatusCode::Accepted, headers, Bytes::new())
+            }
+            2 => {
+                // Abort Copy Response
+                assert_eq!(Method::Put, request.method());
+                assert_eq!("/container/blob", request.url().path());
+                assert_eq!(
+                    Some(format!("comp=copy&copyid={COPY_ID}").as_str()),
+                    request.url().query()
+                );
+                assert_eq!(
+                    "abort",
+                    request
+                        .headers()
+                        .get_str(&HeaderName::from_static("x-ms-copy-action"))
+                        .expect("copy action should be present")
+                );
+
+                AsyncRawResponse::from_bytes(StatusCode::NoContent, Headers::new(), Bytes::new())
+            }
+            3 => {
+                // Get Properties Response
+                assert_eq!(Method::Head, request.method());
+                assert_eq!("/container/blob", request.url().path());
+
+                let mut headers = Headers::new();
+                headers.insert("content-length", "0");
+                headers.insert("x-ms-copy-id", COPY_ID);
+                headers.insert("x-ms-copy-status", "aborted");
+                AsyncRawResponse::from_bytes(StatusCode::Ok, headers, Bytes::new())
+            }
+            _ => panic!("unexpected request"),
+        };
+
+        async move { Ok(response) }.boxed()
+    }));
+    let blob_client = BlobClient::new(
+        Url::parse("https://example.blob.core.windows.net/container/blob")?,
+        None,
+        Some(BlobClientOptions {
+            client_options: ClientOptions {
+                transport: Some(Transport::new(mock_client)),
+                ..Default::default()
+            },
+            ..Default::default()
+        }),
+    )?;
+
+    // Start Copy Scenario
+    let response = blob_client
+        .start_copy_from_url(COPY_SOURCE.to_string(), None)
+        .await?;
+
+    // Assert
+    assert_eq!(Some(CopyStatus::Pending), response.copy_status()?);
+    let copy_id = response.copy_id()?.expect("copy ID should be present");
+
+    // Abort Copy Scenario
+    let response = blob_client.abort_copy_from_url(&copy_id, None).await?;
+
+    // Assert
+    assert_eq!(StatusCode::NoContent, response.status());
+    let response = blob_client.get_properties(None).await?;
+    assert_eq!(Some(CopyStatus::Aborted), response.copy_status()?);
+    assert_eq!(Some(copy_id.as_str()), response.copy_id()?.as_deref());
+    assert_eq!(Some(0), response.content_length()?);
+
     Ok(())
 }
 
