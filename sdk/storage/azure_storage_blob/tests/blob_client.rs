@@ -8,6 +8,7 @@ use azure_core::{
     http::{
         headers::{HeaderName, Headers, CONTENT_TYPE},
         AsyncRawResponse, ClientOptions, Method, RequestContent, StatusCode, Transport, Url,
+        XmlFormat,
     },
     time::{parse_rfc3339, to_rfc3339, OffsetDateTime},
     Bytes,
@@ -22,15 +23,16 @@ use azure_storage_blob::{
         BlobClientSetImmutabilityPolicyOptions, BlobClientSetMetadataOptions,
         BlobClientSetPropertiesOptions, BlobClientSetTierOptions,
         BlobClientStartCopyFromUrlResultHeaders, BlobTags, BlockBlobClientCommitBlockListOptions,
-        BlockBlobClientUploadOptions, CopyStatus, ImmutabilityPolicyMode, LeaseState,
+        BlockBlobClientUploadOptions, CopyStatus, ImmutabilityPolicyMode, KeyInfo, LeaseState,
         RehydratePriority, StorageErrorCode,
     },
     BlobClient, BlobClientOptions, BlobContainerClient, BlobContainerClientOptions, StorageError,
 };
+use azure_storage_sas::SasBuilder;
 use bytes::{BufMut, BytesMut};
 use common::{
-    block_lookup, create_test_blob, get_blob_name, get_container_client, get_container_name,
-    ClientOptionsExt, StorageAccount, TestPolicy,
+    block_lookup, create_test_blob, get_blob_name, get_blob_service_client, get_container_client,
+    get_container_name, poll_until, ClientOptionsExt, StorageAccount, TestPolicy,
 };
 use flate2::{write::GzEncoder, Compression};
 use futures::{FutureExt as _, TryStreamExt};
@@ -175,7 +177,8 @@ async fn test_start_copy_from_url(ctx: TestContext) -> Result<(), Box<dyn Error>
     let recording = ctx.recording();
     let container_client =
         get_container_client(recording, true, StorageAccount::Standard, None).await?;
-    let source_blob_client = container_client.blob_client(&get_blob_name(recording));
+    let source_blob_name = format!("{} source #?% blob.txt", get_blob_name(recording));
+    let source_blob_client = container_client.blob_client(&source_blob_name);
     let destination_blob_client = container_client.blob_client(&get_blob_name(recording));
     let data = b"hello copied rusty world";
     create_test_blob(
@@ -221,6 +224,96 @@ async fn test_start_copy_from_url(ctx: TestContext) -> Result<(), Box<dyn Error>
     assert_eq!(data.as_ref(), &body[..]);
 
     container_client.delete(None).await?;
+    Ok(())
+}
+
+#[recorded::test(live)]
+async fn test_start_copy_from_url_across_accounts(ctx: TestContext) -> Result<(), Box<dyn Error>> {
+    // Recording Setup
+    let recording = ctx.recording();
+    let source_container =
+        get_container_client(recording, true, StorageAccount::Versioned, None).await?;
+    let destination_container =
+        get_container_client(recording, true, StorageAccount::Standard, None).await?;
+    let source_blob_name = get_blob_name(recording);
+    let source_blob_client = source_container.blob_client(&source_blob_name);
+    let destination_blob_client = destination_container.blob_client(&get_blob_name(recording));
+    let data = b"hello cross-account copied rusty world";
+    create_test_blob(
+        &source_blob_client,
+        Some(RequestContent::from(data.to_vec())),
+        None,
+    )
+    .await?;
+
+    let source_account_name = recording.var("VERSIONED_AZURE_STORAGE_ACCOUNT_NAME", None);
+    let source_service_client =
+        get_blob_service_client(recording, StorageAccount::Versioned, None)?;
+    let now = OffsetDateTime::now_utc();
+    let key_info = KeyInfo {
+        start: Some(now),
+        expiry: Some(now + Duration::from_secs(60 * 60)),
+        ..Default::default()
+    };
+    let request_content: RequestContent<KeyInfo, XmlFormat> = key_info.try_into()?;
+    let user_delegation_key = source_service_client
+        .get_user_delegation_key(request_content, None)
+        .await?
+        .into_model()?;
+    let source_container_name = source_container
+        .url()
+        .path_segments()
+        .into_iter()
+        .flatten()
+        .rfind(|segment| !segment.is_empty())
+        .expect("source container URL should contain a container name");
+    let sas = SasBuilder::new(
+        source_account_name.as_str(),
+        &user_delegation_key,
+        now + Duration::from_secs(60 * 60),
+    )?
+    .blob(source_container_name, &source_blob_name)
+    .read()
+    .build();
+    let mut source_url = source_blob_client.url().clone();
+    source_url.set_query(Some(&sas));
+
+    // Act
+    let response = destination_blob_client
+        .start_copy_from_url(source_url.into(), None)
+        .await?;
+
+    // Assert
+    assert!(response.copy_id()?.is_some());
+    assert!(matches!(
+        response.copy_status()?,
+        Some(CopyStatus::Pending | CopyStatus::Success)
+    ));
+    poll_until(recording, || async {
+        Ok(destination_blob_client
+            .get_properties(None)
+            .await?
+            .copy_status()?
+            != Some(CopyStatus::Pending))
+    })
+    .await?;
+    assert_eq!(
+        Some(CopyStatus::Success),
+        destination_blob_client
+            .get_properties(None)
+            .await?
+            .copy_status()?
+    );
+    let body = destination_blob_client
+        .download(None)
+        .await?
+        .body
+        .collect()
+        .await?;
+    assert_eq!(data.as_ref(), &body[..]);
+
+    source_container.delete(None).await?;
+    destination_container.delete(None).await?;
     Ok(())
 }
 
