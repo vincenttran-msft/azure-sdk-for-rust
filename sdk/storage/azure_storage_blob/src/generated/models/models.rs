@@ -120,6 +120,14 @@ pub struct BlobContainerClientGetAccountInfoResult;
 #[derive(SafeDebug)]
 pub struct BlobContainerClientGetPropertiesResult;
 
+/// Contains results for `BlobContainerClient::list_blob_flat_segment_apache_arrow()`
+#[derive(SafeDebug)]
+pub struct BlobContainerClientListBlobFlatSegmentApacheArrowResult;
+
+/// Contains results for `BlobContainerClient::list_blob_hierarchy_segment_apache_arrow()`
+#[derive(SafeDebug)]
+pub struct BlobContainerClientListBlobHierarchySegmentApacheArrowResult;
+
 /// Contains results for `BlobContainerClient::release_lease()`
 #[derive(SafeDebug)]
 pub struct BlobContainerClientReleaseLeaseResult;
@@ -176,6 +184,84 @@ pub struct BlobItem {
     /// The version ID of the blob.
     #[serde(rename = "VersionId", skip_serializing_if = "Option::is_none")]
     pub version_id: Option<String>,
+}
+
+/// The result of the Get Blob Layout API.
+#[derive(Clone, Default, Deserialize, SafeDebug, Serialize)]
+#[non_exhaustive]
+#[serde(rename = "BlobLayout")]
+pub struct BlobLayout {
+    /// The endpoints that serve the ranges of the blob.
+    #[serde(rename = "Endpoints", skip_serializing_if = "Option::is_none")]
+    pub endpoints: Option<BlobLayoutEndpoints>,
+
+    /// The continuation marker used for this request.
+    #[serde(rename = "Marker", skip_serializing_if = "Option::is_none")]
+    pub marker: Option<String>,
+
+    /// The maximum number of ranges to return per request.
+    #[serde(rename = "MaxResults", skip_serializing_if = "Option::is_none")]
+    pub max_results: Option<i32>,
+
+    /// If the number of ranges exceeds MaxResults, a NextMarker is returned for use in subsequent requests to continue listing.
+    #[serde(rename = "NextMarker", skip_serializing_if = "Option::is_none")]
+    pub next_marker: Option<String>,
+
+    /// The ranges that make up the blob.
+    #[serde(default, rename = "Ranges")]
+    pub ranges: BlobLayoutRanges,
+}
+
+/// An endpoint that serves ranges of a blob.
+#[derive(Clone, Default, Deserialize, SafeDebug, Serialize)]
+#[non_exhaustive]
+#[serde(rename = "Endpoint")]
+pub struct BlobLayoutEndpoint {
+    /// The index of the endpoint, referenced by Range elements.
+    #[serde(rename = "@Index", skip_serializing_if = "Option::is_none")]
+    pub index: Option<i32>,
+
+    /// The host:port of the endpoint.
+    #[serde(rename = "@Value", skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+}
+
+/// The endpoints that serve the ranges of a blob.
+#[derive(Clone, Default, Deserialize, SafeDebug, Serialize)]
+#[non_exhaustive]
+#[serde(rename = "Endpoints")]
+pub struct BlobLayoutEndpoints {
+    /// The list of endpoints.
+    #[serde(rename = "Endpoint", skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<Vec<BlobLayoutEndpoint>>,
+}
+
+/// A range of a blob, and the endpoint that serves it.
+#[derive(Clone, Default, Deserialize, SafeDebug, Serialize)]
+#[non_exhaustive]
+#[serde(rename = "Range")]
+pub struct BlobLayoutRange {
+    /// The end byte offset of the range.
+    #[serde(rename = "@End", skip_serializing_if = "Option::is_none")]
+    pub end: Option<i64>,
+
+    /// Index into the Endpoints array indicating which endpoint serves this range.
+    #[serde(rename = "@EndpointIndex", skip_serializing_if = "Option::is_none")]
+    pub endpoint_index: Option<i32>,
+
+    /// The start byte offset of the range.
+    #[serde(rename = "@Start", skip_serializing_if = "Option::is_none")]
+    pub start: Option<i64>,
+}
+
+/// The ranges that make up a blob.
+#[derive(Clone, Default, Deserialize, SafeDebug, Serialize)]
+#[non_exhaustive]
+#[serde(rename = "Ranges")]
+pub struct BlobLayoutRanges {
+    /// The list of ranges.
+    #[serde(default, rename = "Range")]
+    pub range: Vec<BlobLayoutRange>,
 }
 
 /// Represents a blob name.
@@ -418,6 +504,10 @@ pub struct BlobProperties {
     /// Whether the blob is encrypted on the server.
     #[serde(rename = "ServerEncrypted", skip_serializing_if = "Option::is_none")]
     pub server_encrypted: Option<bool>,
+
+    /// The smart access tier of the blob.
+    #[serde(rename = "SmartAccessTier", skip_serializing_if = "Option::is_none")]
+    pub smart_access_tier: Option<AccessTier>,
 
     /// The number of tags for the blob.
     #[serde(rename = "TagCount", skip_serializing_if = "Option::is_none")]

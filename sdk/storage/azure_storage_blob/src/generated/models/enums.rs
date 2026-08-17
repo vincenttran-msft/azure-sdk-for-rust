@@ -54,6 +54,9 @@ pub enum AccessTier {
     /// The Premium access tier.
     Premium,
 
+    /// The Smart access tier.
+    Smart,
+
     /// Any other value not defined in `AccessTier`.
     UnknownValue(String),
 }
@@ -88,6 +91,9 @@ pub enum ArchiveStatus {
 
     /// The archive status is rehydrating pending to Hot.
     RehydratePendingToHot,
+
+    /// The archive status is rehydrating pending to Smart.
+    RehydratePendingToSmart,
 
     /// Any other value not defined in `ArchiveStatus`.
     UnknownValue(String),
@@ -160,6 +166,16 @@ pub enum DeleteSnapshotsOptionType {
 
     /// Only delete the snapshots.
     Only,
+}
+
+/// The download hint for a blob.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum DownloadHint {
+    /// The blob layout can be retrieved with the Get Blob Layout operation.
+    Layout,
+
+    /// Any other value not defined in `DownloadHint`.
+    UnknownValue(String),
 }
 
 /// The algorithm used to produce the encryption key hash.
@@ -255,6 +271,20 @@ pub enum LeaseStatus {
 
     /// The lease is unlocked.
     Unlocked,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ListBlobFlatSegmentApacheArrowResponseContentType {
+    ApplicationVndApacheArrowStream,
+
+    ApplicationXml,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ListBlobHierarchySegmentApacheArrowResponseContentType {
+    ApplicationVndApacheArrowStream,
+
+    ApplicationXml,
 }
 
 /// Specifies additional datasets to include when listing blobs in a container.
