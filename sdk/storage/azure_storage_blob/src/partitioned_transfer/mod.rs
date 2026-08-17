@@ -3,6 +3,7 @@
 
 pub(crate) mod defaults;
 mod download;
+mod layout;
 mod upload;
 
 pub(crate) use download::*;
