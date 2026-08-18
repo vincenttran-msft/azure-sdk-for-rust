@@ -1486,9 +1486,6 @@ fn parse_bytes_range(range: &str) -> (usize, usize) {
     )
 }
 
-/// Mock-transport test: with routing enabled, each parallel range request is sent
-/// to the endpoint the layout assigns to it, while the original account remains the
-/// `Host` header and the downloaded bytes are unchanged.
 /// Test-only Shared Key authorization policy for running live against accounts
 /// that only accept Shared Key (e.g. pre-production, where the Data Locality
 /// preview lives). The shipped client intentionally omits Shared Key support, so
@@ -1676,18 +1673,24 @@ fn live_shared_key_config() -> Option<(String, String, String)> {
     Some((blob_url, account, key))
 }
 
+/// Mock-transport test: with routing enabled and the service hinting a layout, the
+/// initial chunk stays on the account endpoint (the layout isn't known yet) while
+/// each subsequent range request is routed to its layout endpoint — preserving the
+/// original account as the `Host` header and returning byte-identical data.
 #[tokio::test]
 async fn test_download_layout_aware_routing_routes_chunks() -> Result<(), Box<dyn Error>> {
-    const DATA: [u8; 8] = [10, 11, 12, 13, 14, 15, 16, 17];
+    const DATA: [u8; 12] = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21];
     const LAYOUT: &[u8] = br#"<?xml version="1.0" encoding="utf-8"?>
 <BlobLayout>
   <Endpoints>
     <Endpoint Index="0" Value="epa.blob.core.windows.net:443" />
     <Endpoint Index="1" Value="epb.blob.core.windows.net:443" />
+    <Endpoint Index="2" Value="epc.blob.core.windows.net:443" />
   </Endpoints>
   <Ranges>
     <Range Start="0" End="3" EndpointIndex="0" />
     <Range Start="4" End="7" EndpointIndex="1" />
+    <Range Start="8" End="11" EndpointIndex="2" />
   </Ranges>
 </BlobLayout>"#;
 
@@ -1738,6 +1741,8 @@ async fn test_download_layout_aware_routing_routes_chunks() -> Result<(), Box<dy
             );
             headers.insert("content-length", slice.len().to_string());
             headers.insert("etag", "\"routing-etag\"");
+            // The service recommends locality routing for this blob.
+            headers.insert("x-ms-download-hint", "layout");
             AsyncRawResponse::from_bytes(StatusCode::PartialContent, headers, Bytes::from(slice))
         };
         async move { Ok(response) }.boxed()
@@ -1781,26 +1786,117 @@ async fn test_download_layout_aware_routing_routes_chunks() -> Result<(), Box<dy
         Some("acct.blob.core.windows.net")
     );
 
-    // Each data request is routed to the endpoint serving its range, with the
-    // original account preserved as the Host header.
-    assert_eq!(data_requests.len(), 2);
-    for request in data_requests {
+    assert_eq!(data_requests.len(), 3);
+    for request in &data_requests {
         let range = request.range.as_deref().expect("range header");
-        let expected_host = match range {
-            "bytes=0-3" => "epa.blob.core.windows.net",
-            "bytes=4-7" => "epb.blob.core.windows.net",
+        match range {
+            // The initial chunk is fetched before the layout is known, so it stays
+            // on the account endpoint and is never routed.
+            "bytes=0-3" => assert_eq!(
+                request.url_host.as_deref(),
+                Some("acct.blob.core.windows.net"),
+                "the initial chunk should not be routed"
+            ),
+            // Subsequent chunks route to their layout endpoint, preserving the
+            // original account as the Host header.
+            "bytes=4-7" | "bytes=8-11" => {
+                let expected = if range == "bytes=4-7" {
+                    "epb.blob.core.windows.net"
+                } else {
+                    "epc.blob.core.windows.net"
+                };
+                assert_eq!(
+                    request.url_host.as_deref(),
+                    Some(expected),
+                    "range {range} was not routed to its layout endpoint"
+                );
+                assert_eq!(
+                    request.host_header.as_deref(),
+                    Some("acct.blob.core.windows.net"),
+                    "range {range} did not preserve the original Host header"
+                );
+            }
             other => panic!("unexpected data range: {other}"),
+        }
+    }
+
+    Ok(())
+}
+
+/// Mock-transport test: routing is a no-op when the service does not hint a layout —
+/// no Get Blob Layout call is made and every request stays on the account endpoint.
+#[tokio::test]
+async fn test_download_layout_aware_routing_skips_without_hint() -> Result<(), Box<dyn Error>> {
+    const DATA: [u8; 8] = [10, 11, 12, 13, 14, 15, 16, 17];
+
+    let layout_requests = Arc::new(AtomicUsize::new(0));
+    let hosts = Arc::new(Mutex::new(Vec::<Option<String>>::new()));
+    let layout_capture = layout_requests.clone();
+    let hosts_capture = hosts.clone();
+
+    let mock_client = Arc::new(MockHttpClient::new(move |request| {
+        let is_layout = request
+            .url()
+            .query()
+            .is_some_and(|query| query.contains("comp=layout"));
+        hosts_capture
+            .lock()
+            .unwrap()
+            .push(request.url().host_str().map(str::to_owned));
+        let range = request
+            .headers()
+            .get_optional_str(&"range".into())
+            .map(str::to_owned);
+
+        let response = if is_layout {
+            layout_capture.fetch_add(1, Ordering::SeqCst);
+            AsyncRawResponse::from_bytes(StatusCode::NoContent, Headers::new(), Bytes::new())
+        } else {
+            let range = range.expect("data request must carry a range header");
+            let (start, end) = parse_bytes_range(&range);
+            let slice = DATA[start..=end].to_vec();
+            let mut headers = Headers::new();
+            headers.insert(
+                "content-range",
+                format!("bytes {start}-{end}/{}", DATA.len()),
+            );
+            headers.insert("content-length", slice.len().to_string());
+            headers.insert("etag", "\"no-hint-etag\"");
+            // No x-ms-download-hint: the service is not recommending a layout.
+            AsyncRawResponse::from_bytes(StatusCode::PartialContent, headers, Bytes::from(slice))
         };
-        assert_eq!(
-            request.url_host.as_deref(),
-            Some(expected_host),
-            "range {range} was not routed to its layout endpoint"
-        );
-        assert_eq!(
-            request.host_header.as_deref(),
-            Some("acct.blob.core.windows.net"),
-            "range {range} did not preserve the original Host header"
-        );
+        async move { Ok(response) }.boxed()
+    }));
+
+    let blob_client = BlobClient::new(
+        Url::parse("https://acct.blob.core.windows.net/container/blob")?,
+        None,
+        Some(BlobClientOptions {
+            client_options: ClientOptions {
+                transport: Some(Transport::new(mock_client)),
+                ..Default::default()
+            },
+            ..Default::default()
+        }),
+    )?;
+
+    let body = blob_client
+        .download(Some(BlobClientDownloadOptions {
+            layout_aware_routing: LayoutAwareRouting::Enabled,
+            partition_size: Some(NonZero::new(4).unwrap()),
+            parallel: Some(NonZero::new(2).unwrap()),
+            ..Default::default()
+        }))
+        .await?
+        .body
+        .collect()
+        .await?;
+
+    assert_eq!(&body[..], &DATA[..]);
+    // Without the hint, no layout is fetched and nothing is routed.
+    assert_eq!(layout_requests.load(Ordering::SeqCst), 0);
+    for host in hosts.lock().unwrap().iter() {
+        assert_eq!(host.as_deref(), Some("acct.blob.core.windows.net"));
     }
 
     Ok(())

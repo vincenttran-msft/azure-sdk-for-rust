@@ -21,12 +21,16 @@ use azure_core::{
     credentials::TokenCredential,
     error::ErrorKind,
     http::{
+        headers::Headers,
         policies::{auth::BearerTokenAuthorizationPolicy, Policy},
         AsyncRawResponse, Etag, NoFormat, Pipeline, RequestContent, StatusCode, Url, UrlExt,
     },
     tracing, Bytes, Result,
 };
-use std::{ops::Range, sync::Arc};
+use std::{
+    ops::Range,
+    sync::{Arc, OnceLock},
+};
 
 impl BlobClient {
     /// Creates a new BlobClient from a blob URL.
@@ -188,7 +192,7 @@ impl BlobClient {
         &self,
         options: Option<BlobClientDownloadOptions<'_>>,
     ) -> Result<BlobClientDownloadResult> {
-        let mut options = options.unwrap_or_default();
+        let options = options.unwrap_or_default();
         let parallel = options
             .parallel
             .unwrap_or_else(crate::partitioned_transfer::defaults::default_concurrency);
@@ -201,9 +205,10 @@ impl BlobClient {
             version: self.version.clone(),
             tracer: self.tracer.clone(),
         };
-        let layout = prefetch_layout(&inner_client, &mut options).await?;
+        let layout_request = layout_request_from_options(&options);
         let range = options.range.clone();
-        let behavior = BlobClientDownloadBehavior::new(inner_client, options.into(), layout);
+        let behavior =
+            BlobClientDownloadBehavior::new(inner_client, options.into(), layout_request);
         let response =
             partitioned_transfer::download(range, parallel, partition_size, Arc::new(behavior))
                 .await?;
@@ -233,7 +238,7 @@ impl BlobClient {
         buffer: &mut [u8],
         options: Option<BlobClientDownloadOptions<'_>>,
     ) -> Result<BlobClientDownloadIntoResult> {
-        let mut options = options.unwrap_or_default();
+        let options = options.unwrap_or_default();
         let parallel = options
             .parallel
             .unwrap_or_else(crate::partitioned_transfer::defaults::default_concurrency);
@@ -246,9 +251,10 @@ impl BlobClient {
             version: self.version.clone(),
             tracer: self.tracer.clone(),
         };
-        let layout = prefetch_layout(&inner_client, &mut options).await?;
+        let layout_request = layout_request_from_options(&options);
         let range = options.range.clone();
-        let behavior = BlobClientDownloadBehavior::new(inner_client, options.into(), layout);
+        let behavior =
+            BlobClientDownloadBehavior::new(inner_client, options.into(), layout_request);
         let (_, headers, len) = partitioned_transfer::download_into(
             buffer,
             range,
@@ -307,19 +313,27 @@ impl BlobClient {
 struct BlobClientDownloadBehavior<'a> {
     client: GeneratedBlobClient,
     options: BlobClientDownloadInternalOptions<'a>,
-    layout: Option<Arc<Layout>>,
+    /// Get Blob Layout request template, present only when routing is enabled; used
+    /// by [`prepare`](PartitionedDownloadBehavior::prepare) to fetch the layout when
+    /// the service hints at one.
+    layout_request: Option<BlobClientListLayoutOptions<'static>>,
+    /// The resolved layout for this download, populated once by `prepare` before any
+    /// subsequent chunk is issued. `Some(None)` means no routing; unset means the
+    /// initial chunk, which is never routed.
+    layout: OnceLock<Option<Arc<Layout>>>,
 }
 
 impl<'a> BlobClientDownloadBehavior<'a> {
     fn new(
         client: GeneratedBlobClient,
         options: BlobClientDownloadInternalOptions<'a>,
-        layout: Option<Arc<Layout>>,
+        layout_request: Option<BlobClientListLayoutOptions<'static>>,
     ) -> Self {
         Self {
             client,
             options,
-            layout,
+            layout_request,
+            layout: OnceLock::new(),
         }
     }
 }
@@ -334,13 +348,15 @@ impl PartitionedDownloadBehavior for BlobClientDownloadBehavior<'_> {
         let mut opt = self.options.clone();
         // Route this chunk to the endpoint serving its start offset, if a layout is
         // available; the per-call policy rewrites the request to that endpoint.
-        if let (Some(layout), Some(range)) = (&self.layout, &range) {
-            if let Some(endpoint) = layout.ideal_endpoint(range.start as i64) {
-                opt.method_options.context = opt
-                    .method_options
-                    .context
-                    .clone()
-                    .with_value(LayoutEndpoint(endpoint.to_owned()));
+        if let Some(Some(layout)) = self.layout.get() {
+            if let Some(range) = &range {
+                if let Some(endpoint) = layout.ideal_endpoint(range.start as i64) {
+                    opt.method_options.context = opt
+                        .method_options
+                        .context
+                        .clone()
+                        .with_value(LayoutEndpoint(endpoint.to_owned()));
+                }
             }
         }
         opt.range = range.map(HttpRange::from);
@@ -356,32 +372,37 @@ impl PartitionedDownloadBehavior for BlobClientDownloadBehavior<'_> {
             .await
             .map(AsyncRawResponse::from)
     }
+
+    async fn prepare(&self, initial_headers: &Headers, etag_lock: Option<&Etag>) -> Result<()> {
+        let Some(layout_request) = &self.layout_request else {
+            return Ok(()); // routing disabled
+        };
+        // Only fetch the layout when the service recommends it for this blob.
+        if initial_headers.get_optional_str(&"x-ms-download-hint".into()) != Some("layout") {
+            let _ = self.layout.set(None);
+            return Ok(());
+        }
+        let mut request = layout_request.clone();
+        // Pin the layout to the version the download is already reading.
+        if request.if_match.is_none() {
+            request.if_match = etag_lock.cloned();
+        }
+        let context = self.options.method_options.context.clone();
+        let layout = partitioned_transfer::fetch_layout(&self.client, &context, &request)
+            .await?
+            .map(|prefetch| Arc::new(prefetch.layout));
+        let _ = self.layout.set(layout);
+        Ok(())
+    }
 }
 
-/// Prefetches the blob layout for a locality-aware download.
-///
-/// Returns the layout to route chunks with, or `None` when routing is disabled or
-/// the service offers no layout. When a layout is used, `options.if_match` is
-/// pinned to the layout's version (unless the caller already set a condition) so
-/// the whole download reflects one consistent snapshot.
-async fn prefetch_layout(
-    client: &GeneratedBlobClient,
-    options: &mut BlobClientDownloadOptions<'_>,
-) -> Result<Option<Arc<Layout>>> {
-    if !matches!(options.layout_aware_routing, LayoutAwareRouting::Enabled) {
-        return Ok(None);
-    }
-    let list_options = layout_options_from_download(options);
-    let context = options.method_options.context.clone();
-    match partitioned_transfer::fetch_layout(client, &context, &list_options).await? {
-        Some(prefetch) => {
-            if options.if_match.is_none() {
-                options.if_match = prefetch.etag;
-            }
-            Ok(Some(Arc::new(prefetch.layout)))
-        }
-        None => Ok(None),
-    }
+/// Builds the Get Blob Layout request template used to fetch the layout, or `None`
+/// when locality-aware routing is not enabled for this download.
+fn layout_request_from_options(
+    options: &BlobClientDownloadOptions<'_>,
+) -> Option<BlobClientListLayoutOptions<'static>> {
+    matches!(options.layout_aware_routing, LayoutAwareRouting::Enabled)
+        .then(|| layout_options_from_download(options))
 }
 
 /// Maps download options to the equivalent Get Blob Layout options, carrying the

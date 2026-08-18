@@ -38,6 +38,17 @@ pub(crate) trait PartitionedDownloadBehavior {
         range: Option<Range<usize>>,
         etag_lock: Option<Etag>,
     ) -> AzureResult<AsyncRawResponse>;
+
+    /// Called once after the initial response and before any subsequent range
+    /// requests are issued, so the behavior can prepare per-download state (such as
+    /// fetching the blob layout when the service hints at one). Default: no-op.
+    async fn prepare(
+        &self,
+        _initial_headers: &Headers,
+        _etag_lock: Option<&Etag>,
+    ) -> AzureResult<()> {
+        Ok(())
+    }
 }
 
 /// Returns a stream that runs up to parallel-many ranged downloads at a time.
@@ -88,6 +99,8 @@ where
             Box::pin(initial_response.into_body()),
         ));
     }
+    // Prepare per-download routing state (hint-gated) before issuing subsequent chunks.
+    client.prepare(&headers, etag_lock.as_ref()).await?;
     let total_chunks = remaining_ranges.len() + 1;
 
     // channel for download workers to send results to their coordinator.
@@ -200,6 +213,9 @@ where
     if response_analysis.overall_download_range.len() > buffer.len() {
         return Err(insufficient_buffer_err());
     }
+
+    // Prepare per-download routing state (hint-gated) before issuing subsequent chunks.
+    client.prepare(&headers, etag_lock.as_ref()).await?;
 
     // if no real parallelism, just sequentially go through the ranges and write to buffer
     if parallel == 1 {
