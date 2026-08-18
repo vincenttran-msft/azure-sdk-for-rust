@@ -7,6 +7,7 @@ mod layout;
 mod upload;
 
 pub(crate) use download::*;
+pub(crate) use layout::{fetch_layout, Layout, LayoutEndpoint, LayoutRoutingPolicy};
 pub(crate) use upload::*;
 
 use std::{cmp::max, future::Future, num::NonZero, pin::Pin};

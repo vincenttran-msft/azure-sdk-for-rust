@@ -12,15 +12,19 @@ use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
 use azure_core::{
-    error::ErrorKind,
+    error::{CheckSuccessOptions, ErrorKind},
     http::{
         policies::{Policy, PolicyResult},
-        Context, Request, Url,
+        Context, Etag, Method, PipelineSendOptions, Request, StatusCode, Url, UrlExt,
     },
-    Error,
+    time::to_rfc7231,
+    xml, Error, Result,
 };
 
-use crate::generated::models::BlobLayout;
+use crate::generated::{
+    clients::BlobClient,
+    models::{BlobClientListLayoutOptions, BlobLayout},
+};
 
 /// A contiguous byte range of a blob and the endpoint that serves it.
 ///
@@ -204,13 +208,179 @@ fn parse_endpoint_authority(endpoint: &str) -> Option<(String, Option<u16>)> {
     }
 }
 
+/// The outcome of prefetching a blob's layout for a locality-aware download.
+pub(crate) struct LayoutPrefetch {
+    /// The resolved, non-empty layout used to route range requests.
+    pub layout: Layout,
+    /// The ETag pinning the download to a single blob version: the caller-supplied
+    /// condition when present, otherwise the ETag from the first layout page.
+    pub etag: Option<Etag>,
+}
+
+/// Fetches a blob's layout for locality-aware routing, following pagination.
+///
+/// Returns `Ok(Some(_))` when a non-empty layout is available; `Ok(None)` when the
+/// download should proceed normally without routing (no layout, HTTP 204, 400, or
+/// 5xx); and `Err(_)` when the download must fail (HTTP 403/404/409/412 or a
+/// transport error).
+///
+/// Pages after the first are pinned to the first page's ETag via `If-Match` and
+/// reuse the same range, so the assembled layout reflects one consistent version.
+/// The request is built directly rather than via the generated pager so that an
+/// empty HTTP 204 body is recognized before any attempt to deserialize it.
+pub(crate) async fn fetch_layout(
+    client: &BlobClient,
+    context: &Context<'_>,
+    options: &BlobClientListLayoutOptions<'_>,
+) -> Result<Option<LayoutPrefetch>> {
+    let mut layout = Layout::default();
+    let mut locked_etag = options.if_match.clone();
+    let mut marker: Option<String> = None;
+
+    loop {
+        let mut request =
+            build_layout_request(client, options, marker.as_deref(), locked_etag.as_ref());
+        let response = match client
+            .pipeline
+            .send(
+                context,
+                &mut request,
+                Some(PipelineSendOptions {
+                    check_success: CheckSuccessOptions {
+                        success_codes: &[200, 204],
+                    },
+                    ..Default::default()
+                }),
+            )
+            .await
+        {
+            Ok(response) => response,
+            Err(err) => return classify_layout_error(err),
+        };
+
+        let (status, headers, body) = response.deconstruct();
+        // HTTP 204: the service has no layout for this blob; fall back.
+        if status == StatusCode::NoContent {
+            break;
+        }
+        if locked_etag.is_none() {
+            locked_etag = headers.get_optional_str(&"etag".into()).map(Etag::from);
+        }
+        let page: BlobLayout = xml::from_xml(&body)?;
+        layout.extend_from_page(&page);
+
+        match page.next_marker {
+            Some(next) if !next.is_empty() => marker = Some(next),
+            _ => break,
+        }
+    }
+
+    if layout.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(LayoutPrefetch {
+        layout,
+        etag: locked_etag,
+    }))
+}
+
+/// Builds a single Get Blob Layout request, mirroring the generated operation but
+/// leaving pagination and status handling to the caller.
+fn build_layout_request(
+    client: &BlobClient,
+    options: &BlobClientListLayoutOptions<'_>,
+    marker: Option<&str>,
+    if_match: Option<&Etag>,
+) -> Request {
+    let mut url = client.endpoint.clone();
+    {
+        let mut query = url.query_builder();
+        query.append_pair("comp", "layout");
+        if let Some(marker) = marker {
+            query.set_pair("marker", marker);
+        }
+        if let Some(maxresults) = options.maxresults {
+            query.set_pair("maxresults", maxresults.to_string());
+        }
+        if let Some(snapshot) = options.snapshot.as_ref() {
+            query.set_pair("snapshot", snapshot);
+        }
+        if let Some(timeout) = options.timeout {
+            query.set_pair("timeout", timeout.to_string());
+        }
+        if let Some(version_id) = options.version_id.as_ref() {
+            query.set_pair("versionid", version_id);
+        }
+        query.build();
+    }
+
+    let mut request = Request::new(url, Method::Get);
+    request.insert_header("accept", "application/xml");
+    if let Some(if_match) = if_match {
+        request.insert_header("if-match", if_match.to_string());
+    }
+    if let Some(if_modified_since) = options.if_modified_since {
+        request.insert_header("if-modified-since", to_rfc7231(&if_modified_since));
+    }
+    if let Some(if_none_match) = options.if_none_match.as_ref() {
+        request.insert_header("if-none-match", if_none_match.to_string());
+    }
+    if let Some(if_unmodified_since) = options.if_unmodified_since {
+        request.insert_header("if-unmodified-since", to_rfc7231(&if_unmodified_since));
+    }
+    if let Some(range) = options.range.as_ref() {
+        request.insert_header("range", range.to_string());
+    }
+    if let Some(encryption_algorithm) = options.encryption_algorithm.as_ref() {
+        request.insert_header(
+            "x-ms-encryption-algorithm",
+            encryption_algorithm.to_string(),
+        );
+    }
+    if let Some(encryption_key) = options.encryption_key.as_ref() {
+        request.insert_header("x-ms-encryption-key", encryption_key);
+    }
+    if let Some(encryption_key_sha256) = options.encryption_key_sha256.as_ref() {
+        request.insert_header("x-ms-encryption-key-sha256", encryption_key_sha256);
+    }
+    if let Some(if_tags) = options.if_tags.as_ref() {
+        request.insert_header("x-ms-if-tags", if_tags);
+    }
+    if let Some(lease_id) = options.lease_id.as_ref() {
+        request.insert_header("x-ms-lease-id", lease_id);
+    }
+    request.insert_header("x-ms-version", &client.version);
+    request
+}
+
+/// Maps a Get Blob Layout failure to a graceful fall-back (`Ok(None)`) or a hard
+/// failure (`Err`).
+///
+/// HTTP 400 (layout unsupported) and 5xx (transient) fall back to a normal
+/// download; every other failure — 403/404/409/412 and transport errors — fails.
+fn classify_layout_error(err: Error) -> Result<Option<LayoutPrefetch>> {
+    match err.http_status() {
+        Some(status) if status == StatusCode::BadRequest || status.is_server_error() => Ok(None),
+        _ => Err(err),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::generated::models::{
-        BlobLayoutEndpoint, BlobLayoutEndpoints, BlobLayoutRange, BlobLayoutRanges,
+    use crate::generated::{
+        clients::BlobClientOptions,
+        models::{BlobLayoutEndpoint, BlobLayoutEndpoints, BlobLayoutRange, BlobLayoutRanges},
     };
-    use azure_core::http::Method;
+    use azure_core::{
+        http::{
+            headers::Headers, AsyncRawResponse, ClientOptions, FixedRetryOptions, HttpClient,
+            Method, RetryOptions, Transport,
+        },
+        Bytes,
+    };
+    use azure_core_test::http::MockHttpClient;
+    use futures::FutureExt as _;
 
     fn segment(start: i64, end: i64, endpoint: Option<&str>) -> LayoutSegment {
         LayoutSegment {
@@ -405,7 +575,7 @@ mod tests {
         // Malformed inputs yield None so the caller skips routing.
         assert_eq!(parse_endpoint_authority(""), None);
         assert_eq!(parse_endpoint_authority(":443"), None);
-        assert_eq!(parse_endpoint_authority("host.example.net:notaport"), None);
+        assert_eq!(parse_endpoint_authority("host.example.net:port"), None);
     }
 
     #[test]
@@ -456,7 +626,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_layout_endpoint_unparseable_fails_and_leaves_request_untouched() {
+    fn apply_layout_endpoint_malformed_fails_and_leaves_request_untouched() {
         let mut request = request_to("https://acct.blob.core.windows.net/container/blob");
         let result = apply_layout_endpoint(&mut request, "");
 
@@ -464,5 +634,274 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(request.url().host_str(), Some("acct.blob.core.windows.net"));
         assert_eq!(host_header(&request), None);
+    }
+
+    const LAYOUT_SINGLE_PAGE: &[u8] = br#"<?xml version="1.0" encoding="utf-8"?>
+<BlobLayout>
+  <Endpoints>
+    <Endpoint Index="0" Value="ep0.blob.storage.azure.net:443" />
+    <Endpoint Index="1" Value="ep1.blob.storage.azure.net:443" />
+  </Endpoints>
+  <Ranges>
+    <Range Start="0" End="4194303" EndpointIndex="0" />
+    <Range Start="4194304" End="8388607" EndpointIndex="1" />
+  </Ranges>
+</BlobLayout>"#;
+
+    const LAYOUT_PAGE_1: &[u8] = br#"<?xml version="1.0" encoding="utf-8"?>
+<BlobLayout>
+  <Endpoints>
+    <Endpoint Index="0" Value="ep0.blob.storage.azure.net:443" />
+  </Endpoints>
+  <Ranges>
+    <Range Start="0" End="4194303" EndpointIndex="0" />
+  </Ranges>
+  <NextMarker>m2</NextMarker>
+</BlobLayout>"#;
+
+    const LAYOUT_PAGE_2: &[u8] = br#"<?xml version="1.0" encoding="utf-8"?>
+<BlobLayout>
+  <Endpoints>
+    <Endpoint Index="0" Value="ep1.blob.storage.azure.net:443" />
+  </Endpoints>
+  <Ranges>
+    <Range Start="4194304" End="8388607" EndpointIndex="0" />
+  </Ranges>
+</BlobLayout>"#;
+
+    const LAYOUT_EMPTY: &[u8] = br#"<?xml version="1.0" encoding="utf-8"?>
+<BlobLayout><Ranges /></BlobLayout>"#;
+
+    fn layout_client(transport: Arc<dyn HttpClient>) -> BlobClient {
+        BlobClient::new(
+            "https://acct.blob.core.windows.net/container/blob"
+                .parse()
+                .unwrap(),
+            None,
+            Some(BlobClientOptions {
+                client_options: ClientOptions {
+                    transport: Some(Transport::new(transport)),
+                    // Keep error-path tests fast: don't retry mocked 5xx responses.
+                    retry: RetryOptions::fixed(FixedRetryOptions {
+                        max_retries: 0,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }),
+        )
+        .unwrap()
+    }
+
+    fn headers_with_etag(etag: &str) -> Headers {
+        let mut headers = Headers::new();
+        headers.insert("etag", etag.to_owned());
+        headers
+    }
+
+    #[tokio::test]
+    async fn fetch_layout_single_page_builds_layout() {
+        let mock: Arc<dyn HttpClient> = Arc::new(MockHttpClient::new(|req| {
+            assert!(req
+                .url()
+                .query()
+                .is_some_and(|query| query.contains("comp=layout")));
+            async move {
+                Ok(AsyncRawResponse::from_bytes(
+                    StatusCode::Ok,
+                    headers_with_etag("etag-1"),
+                    Bytes::from_static(LAYOUT_SINGLE_PAGE),
+                ))
+            }
+            .boxed()
+        }));
+
+        let client = layout_client(mock);
+        let prefetch = fetch_layout(
+            &client,
+            &Context::new(),
+            &BlobClientListLayoutOptions::default(),
+        )
+        .await
+        .unwrap()
+        .expect("routing should be available");
+
+        assert_eq!(prefetch.etag, Some(Etag::from("etag-1")));
+        assert_eq!(
+            prefetch.layout.ideal_endpoint(0),
+            Some("ep0.blob.storage.azure.net:443")
+        );
+        assert_eq!(
+            prefetch.layout.ideal_endpoint(4_194_304),
+            Some("ep1.blob.storage.azure.net:443")
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_layout_paginates_and_pins_first_page_etag() {
+        let mock: Arc<dyn HttpClient> = Arc::new(MockHttpClient::new(|req| {
+            let query = req.url().query().unwrap_or_default().to_owned();
+            let if_match = req
+                .headers()
+                .get_optional_str(&"if-match".into())
+                .map(str::to_owned);
+            let body: &[u8] = if query.contains("marker=m2") {
+                // Subsequent pages must be pinned to the first page's ETag.
+                assert_eq!(if_match.as_deref(), Some("etag-1"));
+                LAYOUT_PAGE_2
+            } else {
+                // The first page carries no caller condition.
+                assert_eq!(if_match, None);
+                LAYOUT_PAGE_1
+            };
+            async move {
+                Ok(AsyncRawResponse::from_bytes(
+                    StatusCode::Ok,
+                    headers_with_etag("etag-1"),
+                    Bytes::copy_from_slice(body),
+                ))
+            }
+            .boxed()
+        }));
+
+        let client = layout_client(mock);
+        let prefetch = fetch_layout(
+            &client,
+            &Context::new(),
+            &BlobClientListLayoutOptions::default(),
+        )
+        .await
+        .unwrap()
+        .expect("routing should be available");
+
+        assert_eq!(prefetch.etag, Some(Etag::from("etag-1")));
+        assert_eq!(
+            prefetch.layout.ideal_endpoint(0),
+            Some("ep0.blob.storage.azure.net:443")
+        );
+        assert_eq!(
+            prefetch.layout.ideal_endpoint(4_194_304),
+            Some("ep1.blob.storage.azure.net:443")
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_layout_no_content_falls_back() {
+        let mock: Arc<dyn HttpClient> = Arc::new(MockHttpClient::new(|_req| {
+            async move {
+                Ok(AsyncRawResponse::from_bytes(
+                    StatusCode::NoContent,
+                    Headers::new(),
+                    Bytes::new(),
+                ))
+            }
+            .boxed()
+        }));
+
+        let client = layout_client(mock);
+        let result = fetch_layout(
+            &client,
+            &Context::new(),
+            &BlobClientListLayoutOptions::default(),
+        )
+        .await
+        .unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn fetch_layout_empty_ranges_falls_back() {
+        let mock: Arc<dyn HttpClient> = Arc::new(MockHttpClient::new(|_req| {
+            async move {
+                Ok(AsyncRawResponse::from_bytes(
+                    StatusCode::Ok,
+                    headers_with_etag("etag-1"),
+                    Bytes::from_static(LAYOUT_EMPTY),
+                ))
+            }
+            .boxed()
+        }));
+
+        let client = layout_client(mock);
+        let result = fetch_layout(
+            &client,
+            &Context::new(),
+            &BlobClientListLayoutOptions::default(),
+        )
+        .await
+        .unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn fetch_layout_bad_request_falls_back() {
+        let mock: Arc<dyn HttpClient> = Arc::new(MockHttpClient::new(|_req| {
+            async move {
+                Ok(AsyncRawResponse::from_bytes(
+                    StatusCode::BadRequest,
+                    Headers::new(),
+                    Bytes::new(),
+                ))
+            }
+            .boxed()
+        }));
+
+        let client = layout_client(mock);
+        let result = fetch_layout(
+            &client,
+            &Context::new(),
+            &BlobClientListLayoutOptions::default(),
+        )
+        .await
+        .unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn fetch_layout_server_error_falls_back() {
+        let mock: Arc<dyn HttpClient> = Arc::new(MockHttpClient::new(|_req| {
+            async move {
+                Ok(AsyncRawResponse::from_bytes(
+                    StatusCode::InternalServerError,
+                    Headers::new(),
+                    Bytes::new(),
+                ))
+            }
+            .boxed()
+        }));
+
+        let client = layout_client(mock);
+        let result = fetch_layout(
+            &client,
+            &Context::new(),
+            &BlobClientListLayoutOptions::default(),
+        )
+        .await
+        .unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn fetch_layout_forbidden_fails() {
+        let mock: Arc<dyn HttpClient> = Arc::new(MockHttpClient::new(|_req| {
+            async move {
+                Ok(AsyncRawResponse::from_bytes(
+                    StatusCode::Forbidden,
+                    Headers::new(),
+                    Bytes::new(),
+                ))
+            }
+            .boxed()
+        }));
+
+        let client = layout_client(mock);
+        let result = fetch_layout(
+            &client,
+            &Context::new(),
+            &BlobClientListLayoutOptions::default(),
+        )
+        .await;
+        assert!(result.is_err());
     }
 }
