@@ -3,14 +3,17 @@
 
 mod common;
 
+use async_trait::async_trait;
 use azure_core::{
+    credentials::Secret,
     error::ErrorKind,
     http::{
         headers::{HeaderName, Headers, CONTENT_TYPE},
-        AsyncRawResponse, ClientOptions, Method, RequestContent, StatusCode, Transport, Url,
-        XmlFormat,
+        policies::{Policy, PolicyResult},
+        AsyncRawResponse, ClientOptions, Context, FixedRetryOptions, Method, Request,
+        RequestContent, RetryOptions, StatusCode, Transport, Url, XmlFormat,
     },
-    time::{parse_rfc3339, to_rfc3339, OffsetDateTime},
+    time::{parse_rfc3339, to_rfc3339, to_rfc7231, OffsetDateTime},
     Bytes,
 };
 use azure_core_test::{http::MockHttpClient, recorded, Matcher, TestContext, TestMode, VarOptions};
@@ -23,8 +26,8 @@ use azure_storage_blob::{
         BlobClientSetImmutabilityPolicyOptions, BlobClientSetMetadataOptions,
         BlobClientSetPropertiesOptions, BlobClientSetTierOptions,
         BlobClientStartCopyFromUrlResultHeaders, BlobTags, BlockBlobClientUploadOptions,
-        CopyStatus, ImmutabilityPolicyMode, KeyInfo, LeaseState, RehydratePriority,
-        StorageErrorCode,
+        CopyStatus, ImmutabilityPolicyMode, KeyInfo, LayoutAwareRouting, LeaseState,
+        RehydratePriority, StorageErrorCode,
     },
     BlobClient, BlobClientOptions, BlobContainerClient, BlobContainerClientOptions, StorageError,
 };
@@ -38,13 +41,13 @@ use flate2::{write::GzEncoder, Compression};
 use futures::{FutureExt as _, TryStreamExt};
 use std::{
     cmp::min,
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     error::Error,
     io::Write,
     num::NonZero,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        mpsc, Arc,
+        mpsc, Arc, Mutex,
     },
     time::Duration,
 };
@@ -1469,6 +1472,422 @@ async fn test_managed_download_into_etag_lock(ctx: TestContext) -> Result<(), Bo
             None => locked_etag = Some(req_etag_lock.to_string()),
         }
     }
+
+    Ok(())
+}
+
+/// Parses a `bytes=start-end` request range header into its inclusive bounds.
+fn parse_bytes_range(range: &str) -> (usize, usize) {
+    let spec = range.strip_prefix("bytes=").expect("bytes= prefix");
+    let (start, end) = spec.split_once('-').expect("start-end");
+    (
+        start.parse().expect("range start"),
+        end.parse().expect("range end"),
+    )
+}
+
+/// Mock-transport test: with routing enabled, each parallel range request is sent
+/// to the endpoint the layout assigns to it, while the original account remains the
+/// `Host` header and the downloaded bytes are unchanged.
+/// Test-only Shared Key authorization policy for running live against accounts
+/// that only accept Shared Key (e.g. pre-production, where the Data Locality
+/// preview lives). The shipped client intentionally omits Shared Key support, so
+/// this stays in tests.
+#[derive(Debug)]
+struct SharedKeyAuthPolicy {
+    account: String,
+    key: Secret,
+}
+
+#[async_trait]
+impl Policy for SharedKeyAuthPolicy {
+    async fn send(
+        &self,
+        ctx: &Context,
+        request: &mut Request,
+        next: &[Arc<dyn Policy>],
+    ) -> PolicyResult {
+        request.insert_header("x-ms-date", to_rfc7231(&OffsetDateTime::now_utc()));
+
+        let string_to_sign = {
+            let headers = request.headers();
+            let header = |name: &str| {
+                headers
+                    .get_optional_str(&HeaderName::from(name.to_owned()))
+                    .unwrap_or_default()
+                    .to_owned()
+            };
+            // Content-Length is signed as empty when zero (service version 2015-02-21+).
+            let content_length = header("content-length");
+            let content_length = if content_length == "0" {
+                String::new()
+            } else {
+                content_length
+            };
+            format!(
+                "{method}\n{content_encoding}\n{content_language}\n{content_length}\n{content_md5}\n{content_type}\n\n{if_modified_since}\n{if_match}\n{if_none_match}\n{if_unmodified_since}\n{range}\n{canonicalized_headers}{canonicalized_resource}",
+                method = request.method().as_str(),
+                content_encoding = header("content-encoding"),
+                content_language = header("content-language"),
+                content_md5 = header("content-md5"),
+                content_type = header("content-type"),
+                if_modified_since = header("if-modified-since"),
+                if_match = header("if-match"),
+                if_none_match = header("if-none-match"),
+                if_unmodified_since = header("if-unmodified-since"),
+                range = header("range"),
+                canonicalized_headers = shared_key_canonicalized_headers(headers),
+                canonicalized_resource =
+                    shared_key_canonicalized_resource(request.url(), &self.account),
+            )
+        };
+
+        let signature = azure_core::hmac::hmac_sha256(&string_to_sign, &self.key)?;
+        request.insert_header(
+            "authorization",
+            format!("SharedKey {}:{}", self.account, signature),
+        );
+
+        next[0].send(ctx, request, &next[1..]).await
+    }
+}
+
+/// Canonicalizes the `x-ms-*` request headers for the Shared Key string-to-sign.
+fn shared_key_canonicalized_headers(headers: &Headers) -> String {
+    let mut entries: BTreeMap<String, String> = BTreeMap::new();
+    for (name, value) in headers.iter() {
+        let name = name.as_str().to_ascii_lowercase();
+        if name.starts_with("x-ms-") {
+            entries.insert(name, value.as_str().trim().to_owned());
+        }
+    }
+    let mut result = String::new();
+    for (name, value) in entries {
+        result.push_str(&name);
+        result.push(':');
+        result.push_str(&value);
+        result.push('\n');
+    }
+    result
+}
+
+/// Canonicalizes the resource path and query for the Shared Key string-to-sign.
+///
+/// Uses the stored account name rather than the request host, so the signature is
+/// host-independent — which is what lets locality routing rewrite the host safely.
+fn shared_key_canonicalized_resource(url: &Url, account: &str) -> String {
+    let mut result = format!("/{}{}", account, url.path());
+    let mut params: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (name, value) in url.query_pairs() {
+        params
+            .entry(name.into_owned().to_ascii_lowercase())
+            .or_default()
+            .push(value.into_owned());
+    }
+    for (name, mut values) in params {
+        values.sort();
+        result.push('\n');
+        result.push_str(&name);
+        result.push(':');
+        result.push_str(&values.join(","));
+    }
+    result
+}
+
+/// Builds the Shared Key test client options (a per-try [`SharedKeyAuthPolicy`]).
+fn shared_key_client_options(account: &str, key: &str) -> ClientOptions {
+    let policy: Arc<dyn Policy> = Arc::new(SharedKeyAuthPolicy {
+        account: account.to_owned(),
+        key: Secret::new(key.to_owned()),
+    });
+    ClientOptions {
+        per_try_policies: vec![policy],
+        // Fail fast on connection errors instead of spending ~80s retrying an
+        // unreachable endpoint while iterating on the live test.
+        retry: RetryOptions::fixed(FixedRetryOptions {
+            max_retries: 0,
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
+/// Builds a Shared Key–authenticated [`BlobClient`] (test-only).
+fn shared_key_blob_client(
+    url: Url,
+    account: &str,
+    key: &str,
+) -> Result<BlobClient, Box<dyn Error>> {
+    Ok(BlobClient::new(
+        url,
+        None,
+        Some(BlobClientOptions {
+            client_options: shared_key_client_options(account, key),
+            ..Default::default()
+        }),
+    )?)
+}
+
+/// Resolves the configured blob URL: prepends `https://` when no scheme is given
+/// and fills in a default container and/or blob when the path omits them, so the
+/// value may be just the account endpoint.
+fn normalize_blob_url(value: &str) -> Result<Url, Box<dyn Error>> {
+    const DEFAULT_CONTAINER: &str = "layout-routing-test";
+    const DEFAULT_BLOB: &str = "routing-test-blob";
+
+    let text = if value.contains("://") {
+        value.to_owned()
+    } else {
+        format!("https://{value}")
+    };
+    let mut url = Url::parse(&text).map_err(|e| {
+        format!("AZURE_STORAGE_LAYOUT_BLOB_URL is not a valid URL (got {value:?}): {e}")
+    })?;
+    if url.cannot_be_a_base() {
+        return Err(
+            format!("AZURE_STORAGE_LAYOUT_BLOB_URL must be an https URL (got {value:?})").into(),
+        );
+    }
+
+    let segments: Vec<String> = url
+        .path_segments()
+        .map(|s| s.filter(|p| !p.is_empty()).map(str::to_owned).collect())
+        .unwrap_or_default();
+    match segments.as_slice() {
+        [] => url.set_path(&format!("/{DEFAULT_CONTAINER}/{DEFAULT_BLOB}")),
+        [container] => url.set_path(&format!("/{container}/{DEFAULT_BLOB}")),
+        _ => {} // container and blob already provided
+    }
+    Ok(url)
+}
+
+/// Reads the live Shared Key test configuration from the environment, returning
+/// `None` (so the test is skipped) when any variable is unset or blank. Surrounding
+/// quotes and whitespace are trimmed, tolerating `set VAR="..."` in cmd.
+fn live_shared_key_config() -> Option<(String, String, String)> {
+    fn read(name: &str) -> Option<String> {
+        let value = std::env::var(name).ok()?;
+        let value = value.trim().trim_matches('"').trim().to_owned();
+        (!value.is_empty()).then_some(value)
+    }
+    let blob_url = read("AZURE_STORAGE_LAYOUT_BLOB_URL")?;
+    let account = read("AZURE_STORAGE_ACCOUNT_NAME")?;
+    let key = read("AZURE_STORAGE_ACCOUNT_KEY")?;
+    Some((blob_url, account, key))
+}
+
+#[tokio::test]
+async fn test_download_layout_aware_routing_routes_chunks() -> Result<(), Box<dyn Error>> {
+    const DATA: [u8; 8] = [10, 11, 12, 13, 14, 15, 16, 17];
+    const LAYOUT: &[u8] = br#"<?xml version="1.0" encoding="utf-8"?>
+<BlobLayout>
+  <Endpoints>
+    <Endpoint Index="0" Value="epa.blob.core.windows.net:443" />
+    <Endpoint Index="1" Value="epb.blob.core.windows.net:443" />
+  </Endpoints>
+  <Ranges>
+    <Range Start="0" End="3" EndpointIndex="0" />
+    <Range Start="4" End="7" EndpointIndex="1" />
+  </Ranges>
+</BlobLayout>"#;
+
+    #[derive(Clone)]
+    struct Seen {
+        is_layout: bool,
+        url_host: Option<String>,
+        host_header: Option<String>,
+        range: Option<String>,
+    }
+
+    let seen = Arc::new(Mutex::new(Vec::<Seen>::new()));
+    let seen_capture = seen.clone();
+
+    let mock_client = Arc::new(MockHttpClient::new(move |request| {
+        let is_layout = request
+            .url()
+            .query()
+            .is_some_and(|query| query.contains("comp=layout"));
+        let url_host = request.url().host_str().map(str::to_owned);
+        let host_header = request
+            .headers()
+            .get_optional_str(&"host".into())
+            .map(str::to_owned);
+        let range = request
+            .headers()
+            .get_optional_str(&"range".into())
+            .map(str::to_owned);
+        seen_capture.lock().unwrap().push(Seen {
+            is_layout,
+            url_host,
+            host_header,
+            range: range.clone(),
+        });
+
+        let response = if is_layout {
+            let mut headers = Headers::new();
+            headers.insert("etag", "\"routing-etag\"");
+            AsyncRawResponse::from_bytes(StatusCode::Ok, headers, Bytes::from_static(LAYOUT))
+        } else {
+            let range = range.expect("data request must carry a range header");
+            let (start, end) = parse_bytes_range(&range);
+            let slice = DATA[start..=end].to_vec();
+            let mut headers = Headers::new();
+            headers.insert(
+                "content-range",
+                format!("bytes {start}-{end}/{}", DATA.len()),
+            );
+            headers.insert("content-length", slice.len().to_string());
+            headers.insert("etag", "\"routing-etag\"");
+            AsyncRawResponse::from_bytes(StatusCode::PartialContent, headers, Bytes::from(slice))
+        };
+        async move { Ok(response) }.boxed()
+    }));
+
+    let blob_client = BlobClient::new(
+        Url::parse("https://acct.blob.core.windows.net/container/blob")?,
+        None,
+        Some(BlobClientOptions {
+            client_options: ClientOptions {
+                transport: Some(Transport::new(mock_client)),
+                ..Default::default()
+            },
+            ..Default::default()
+        }),
+    )?;
+
+    let body = blob_client
+        .download(Some(BlobClientDownloadOptions {
+            layout_aware_routing: LayoutAwareRouting::Enabled,
+            partition_size: Some(NonZero::new(4).unwrap()),
+            parallel: Some(NonZero::new(2).unwrap()),
+            ..Default::default()
+        }))
+        .await?
+        .body
+        .collect()
+        .await?;
+
+    // Routing is byte-transparent.
+    assert_eq!(&body[..], &DATA[..]);
+
+    let seen = seen.lock().unwrap();
+    let layout_requests: Vec<&Seen> = seen.iter().filter(|s| s.is_layout).collect();
+    let data_requests: Vec<&Seen> = seen.iter().filter(|s| !s.is_layout).collect();
+
+    // Exactly one layout request, sent to the account endpoint without rewriting.
+    assert_eq!(layout_requests.len(), 1);
+    assert_eq!(
+        layout_requests[0].url_host.as_deref(),
+        Some("acct.blob.core.windows.net")
+    );
+
+    // Each data request is routed to the endpoint serving its range, with the
+    // original account preserved as the Host header.
+    assert_eq!(data_requests.len(), 2);
+    for request in data_requests {
+        let range = request.range.as_deref().expect("range header");
+        let expected_host = match range {
+            "bytes=0-3" => "epa.blob.core.windows.net",
+            "bytes=4-7" => "epb.blob.core.windows.net",
+            other => panic!("unexpected data range: {other}"),
+        };
+        assert_eq!(
+            request.url_host.as_deref(),
+            Some(expected_host),
+            "range {range} was not routed to its layout endpoint"
+        );
+        assert_eq!(
+            request.host_header.as_deref(),
+            Some("acct.blob.core.windows.net"),
+            "range {range} did not preserve the original Host header"
+        );
+    }
+
+    Ok(())
+}
+
+/// Live-only: runs locality-aware routing downloads against a real account using
+/// Shared Key. The shipped client omits Shared Key, and the Data Locality preview
+/// is only available on pre-production accounts that require Shared Key, so this
+/// test authenticates with a test-only policy and is skipped unless configured:
+///
+/// - `AZURE_STORAGE_LAYOUT_BLOB_URL` — account endpoint (e.g.
+///   `https://account.blob.core.windows.net`) or a full `.../container/blob` URL; a
+///   default container and blob are filled in when omitted, and the container is
+///   created if it does not exist.
+/// - `AZURE_STORAGE_ACCOUNT_NAME` — account name used to sign requests.
+/// - `AZURE_STORAGE_ACCOUNT_KEY` — base64 account key used to sign requests.
+///
+/// Verifies both `download` and `download_into` return byte-identical data with
+/// `LayoutAwareRouting::Enabled` (routing is a transparent optimization).
+#[tokio::test]
+async fn test_download_layout_aware_routing_live() -> Result<(), Box<dyn Error>> {
+    let Some((blob_url, account, key)) = live_shared_key_config() else {
+        eprintln!(
+            "skipping test_download_layout_aware_routing_live: set AZURE_STORAGE_LAYOUT_BLOB_URL, \
+             AZURE_STORAGE_ACCOUNT_NAME, and AZURE_STORAGE_ACCOUNT_KEY to run it"
+        );
+        return Ok(());
+    };
+    let url = normalize_blob_url(&blob_url)?;
+
+    // Ensure the container exists (idempotent create) before uploading.
+    let mut container_url = url.clone();
+    container_url
+        .path_segments_mut()
+        .expect("blob URL must be a base")
+        .pop();
+    let container_client = BlobContainerClient::new(
+        container_url,
+        None,
+        Some(BlobContainerClientOptions {
+            client_options: shared_key_client_options(&account, &key),
+            ..Default::default()
+        }),
+    )?;
+    if let Err(e) = container_client.create(None).await {
+        if e.http_status() != Some(StatusCode::Conflict) {
+            return Err(e.into());
+        }
+    }
+
+    let blob_client = shared_key_blob_client(url, &account, &key)?;
+
+    // Upload enough data to split into multiple routed partitions.
+    let data: Vec<u8> = (0..8 * 1024 * 1024).map(|i| (i % 251) as u8).collect();
+    blob_client
+        .upload(RequestContent::from(data.clone()), None)
+        .await?;
+
+    // download (streaming)
+    let body = blob_client
+        .download(Some(BlobClientDownloadOptions {
+            layout_aware_routing: LayoutAwareRouting::Enabled,
+            partition_size: Some(NonZero::new(1024 * 1024).unwrap()),
+            parallel: Some(NonZero::new(4).unwrap()),
+            ..Default::default()
+        }))
+        .await?
+        .body
+        .collect()
+        .await?;
+    assert_eq!(&body[..], &data[..]);
+
+    // download_into (buffer)
+    let mut buffer = vec![0u8; data.len()];
+    let result = blob_client
+        .download_into(
+            &mut buffer,
+            Some(BlobClientDownloadOptions {
+                layout_aware_routing: LayoutAwareRouting::Enabled,
+                partition_size: Some(NonZero::new(1024 * 1024).unwrap()),
+                parallel: Some(NonZero::new(4).unwrap()),
+                ..Default::default()
+            }),
+        )
+        .await?;
+    assert_eq!(result.len, data.len());
+    assert_eq!(&buffer[..], &data[..]);
 
     Ok(())
 }
