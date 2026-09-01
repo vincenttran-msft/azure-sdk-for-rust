@@ -128,10 +128,10 @@ async fn session_service_client(
         account_name: Some(account_name),
         ..Default::default()
     };
-    BlobServiceClient::new_with_session_options(
+    options.session_options = Some(session_options);
+    BlobServiceClient::new(
         Url::parse(&endpoint)?,
         Some(recording.credential()),
-        session_options,
         Some(options),
     )
 }
@@ -155,10 +155,10 @@ fn shared_provider_client(
         account_name: Some(account_name.to_string()),
         session_provider: Some(provider),
     };
-    BlobServiceClient::new_with_session_options(
+    options.session_options = Some(session_options);
+    BlobServiceClient::new(
         Url::parse(&endpoint)?,
         Some(recording.credential()),
-        session_options,
         Some(options),
     )
 }

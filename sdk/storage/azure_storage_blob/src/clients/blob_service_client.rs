@@ -6,10 +6,7 @@ pub use crate::generated::clients::{BlobServiceClient, BlobServiceClientOptions}
 use crate::{BlobClient, BlobContainerClient};
 use azure_core::{
     credentials::TokenCredential,
-    http::{
-        policies::{auth::BearerTokenAuthorizationPolicy, Policy},
-        Pipeline, Url,
-    },
+    http::{Pipeline, Url},
     tracing, Result,
 };
 use std::sync::Arc;
@@ -37,69 +34,7 @@ impl BlobServiceClient {
             ));
         }
         let mut options = options.unwrap_or_default();
-        super::apply_client_defaults(&mut options.client_options);
-
-        let mut per_retry_policies: Vec<Arc<dyn Policy>> = Vec::default();
-        if let Some(token_credential) = credential {
-            if !service_url.scheme().starts_with("https") {
-                return Err(azure_core::Error::with_message(
-                    azure_core::error::ErrorKind::Other,
-                    format!("{service_url} must use https"),
-                ));
-            }
-            per_retry_policies.push(Arc::new(BearerTokenAuthorizationPolicy::new(
-                token_credential,
-                vec!["https://storage.azure.com/.default"],
-            )));
-        }
-
-        let pipeline = Pipeline::new(
-            option_env!("CARGO_PKG_NAME"),
-            option_env!("CARGO_PKG_VERSION"),
-            options.client_options.clone(),
-            Vec::default(),
-            per_retry_policies,
-            None,
-        );
-
-        Ok(Self {
-            endpoint: service_url,
-            version: options.version,
-            pipeline,
-        })
-    }
-
-    /// Creates a new BlobServiceClient with session token authentication configured.
-    ///
-    /// This additive constructor exists because [`SessionOptions`](crate::SessionOptions)
-    /// cannot yet be carried on the generated [`BlobServiceClientOptions`]. Use
-    /// [`BlobServiceClient::new`] when session authentication is not needed.
-    ///
-    /// # Arguments
-    ///
-    /// * `service_url` - The full URL of the Azure storage account, for example `https://myaccount.blob.core.windows.net/`.
-    /// * `credential` - An optional implementation of [`TokenCredential`] that can provide an Entra ID token to use when authenticating.
-    /// * `session_options` - Configuration for session token authentication.
-    /// * `options` - Optional configuration for the client.
-    //
-    // TODO: fold `SessionOptions` into the generated client options once the code
-    // generator supports additional fields, and remove this constructor.
-    #[tracing::new("Storage.Blob.Service")]
-    pub fn new_with_session_options(
-        service_url: Url,
-        credential: Option<Arc<dyn TokenCredential>>,
-        session_options: crate::SessionOptions,
-        options: Option<BlobServiceClientOptions>,
-    ) -> Result<Self> {
-        // Storage endpoints must be base URLs.
-        if service_url.cannot_be_a_base() {
-            return Err(azure_core::Error::with_message(
-                azure_core::error::ErrorKind::Other,
-                format!("{service_url} is not a valid base URL"),
-            ));
-        }
-
-        let mut options = options.unwrap_or_default();
+        let session_options = options.session_options.clone().unwrap_or_default();
         // Build auth policies from the pre-default options so the session provider's
         // own service client applies its defaults exactly once.
         let per_retry_policies = super::build_auth_policies(
@@ -122,8 +57,9 @@ impl BlobServiceClient {
 
         Ok(Self {
             endpoint: service_url,
-            version: options.version,
             pipeline,
+            session_options: options.session_options,
+            version: options.version,
         })
     }
 
@@ -143,6 +79,7 @@ impl BlobServiceClient {
         BlobContainerClient {
             endpoint: container_url,
             pipeline: self.pipeline.clone(),
+            session_options: self.session_options.clone(),
             version: self.version.clone(),
             tracer: self.tracer.clone(),
         }
@@ -165,6 +102,7 @@ impl BlobServiceClient {
         BlobClient {
             endpoint: blob_url,
             pipeline: self.pipeline.clone(),
+            session_options: self.session_options.clone(),
             version: self.version.clone(),
             tracer: self.tracer.clone(),
         }

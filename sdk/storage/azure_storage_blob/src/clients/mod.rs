@@ -59,11 +59,6 @@ fn apply_client_defaults(options: &mut ClientOptions) {
 ///
 /// The `client_options` and `version` are those of the constructing client,
 /// used to build the session provider's own session-free service client.
-//
-// This is a temporary shape: session options are threaded through a dedicated
-// parameter because they cannot yet be carried on the generated client options.
-// TODO: fold `SessionOptions` into the generated options once the generator
-// supports additional fields, and drop the `new_with_session_options` constructors.
 fn build_auth_policies(
     endpoint: &Url,
     credential: Option<Arc<dyn TokenCredential>>,
@@ -124,6 +119,7 @@ fn build_auth_policies(
         None => {
             let service_options = BlobServiceClientOptions {
                 client_options: client_options.clone(),
+                session_options: None,
                 version: version.to_string(),
             };
             let provider: Arc<dyn SessionProvider> =

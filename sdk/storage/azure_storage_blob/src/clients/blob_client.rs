@@ -19,10 +19,7 @@ use async_trait::async_trait;
 use azure_core::{
     credentials::TokenCredential,
     error::ErrorKind,
-    http::{
-        policies::{auth::BearerTokenAuthorizationPolicy, Policy},
-        AsyncRawResponse, Etag, NoFormat, Pipeline, RequestContent, StatusCode, Url, UrlExt,
-    },
+    http::{AsyncRawResponse, Etag, NoFormat, Pipeline, RequestContent, StatusCode, Url, UrlExt},
     tracing, Bytes, Result,
 };
 use std::{ops::Range, sync::Arc};
@@ -51,69 +48,7 @@ impl BlobClient {
         }
 
         let mut options = options.unwrap_or_default();
-        super::apply_client_defaults(&mut options.client_options);
-
-        let mut per_retry_policies: Vec<Arc<dyn Policy>> = Vec::default();
-        if let Some(token_credential) = credential {
-            if !blob_url.scheme().starts_with("https") {
-                return Err(azure_core::Error::with_message(
-                    azure_core::error::ErrorKind::Other,
-                    format!("{blob_url} must use https"),
-                ));
-            }
-            per_retry_policies.push(Arc::new(BearerTokenAuthorizationPolicy::new(
-                token_credential,
-                vec!["https://storage.azure.com/.default"],
-            )));
-        }
-
-        let pipeline = Pipeline::new(
-            option_env!("CARGO_PKG_NAME"),
-            option_env!("CARGO_PKG_VERSION"),
-            options.client_options.clone(),
-            Vec::default(),
-            per_retry_policies,
-            None,
-        );
-
-        Ok(Self {
-            endpoint: blob_url,
-            version: options.version,
-            pipeline,
-        })
-    }
-
-    /// Creates a new BlobClient with session token authentication configured.
-    ///
-    /// This additive constructor exists because [`SessionOptions`](crate::SessionOptions)
-    /// cannot yet be carried on the generated [`BlobClientOptions`]. Use
-    /// [`BlobClient::new`] when session authentication is not needed.
-    ///
-    /// # Arguments
-    ///
-    /// * `blob_url` - The full URL of the blob, for example `https://myaccount.blob.core.windows.net/mycontainer/myblob`.
-    /// * `credential` - An optional implementation of [`TokenCredential`] that can provide an Entra ID token to use when authenticating.
-    /// * `session_options` - Configuration for session token authentication.
-    /// * `options` - Optional configuration for the client.
-    //
-    // TODO: fold `SessionOptions` into the generated client options once the code
-    // generator supports additional fields, and remove this constructor.
-    #[tracing::new("Storage.Blob.Blob")]
-    pub fn new_with_session_options(
-        blob_url: Url,
-        credential: Option<Arc<dyn TokenCredential>>,
-        session_options: crate::SessionOptions,
-        options: Option<BlobClientOptions>,
-    ) -> Result<Self> {
-        // Storage endpoints must be base URLs.
-        if blob_url.cannot_be_a_base() {
-            return Err(azure_core::Error::with_message(
-                azure_core::error::ErrorKind::Other,
-                format!("{blob_url} is not a valid base URL"),
-            ));
-        }
-
-        let mut options = options.unwrap_or_default();
+        let session_options = options.session_options.clone().unwrap_or_default();
         // Build auth policies from the pre-default options so the session provider's
         // own service client applies its defaults exactly once.
         let per_retry_policies = super::build_auth_policies(
@@ -136,8 +71,9 @@ impl BlobClient {
 
         Ok(Self {
             endpoint: blob_url,
-            version: options.version,
             pipeline,
+            session_options: options.session_options,
+            version: options.version,
         })
     }
 
@@ -146,6 +82,7 @@ impl BlobClient {
         AppendBlobClient {
             endpoint: self.endpoint.clone(),
             pipeline: self.pipeline.clone(),
+            session_options: self.session_options.clone(),
             version: self.version.clone(),
             tracer: self.tracer.clone(),
         }
@@ -156,6 +93,7 @@ impl BlobClient {
         BlockBlobClient {
             endpoint: self.endpoint.clone(),
             pipeline: self.pipeline.clone(),
+            session_options: self.session_options.clone(),
             version: self.version.clone(),
             tracer: self.tracer.clone(),
         }
@@ -166,6 +104,7 @@ impl BlobClient {
         PageBlobClient {
             endpoint: self.endpoint.clone(),
             pipeline: self.pipeline.clone(),
+            session_options: self.session_options.clone(),
             version: self.version.clone(),
             tracer: self.tracer.clone(),
         }
@@ -192,6 +131,7 @@ impl BlobClient {
         Ok(Self {
             endpoint: versioned_endpoint,
             pipeline: self.pipeline.clone(),
+            session_options: self.session_options.clone(),
             version: self.version.clone(),
             tracer: self.tracer.clone(),
         })
@@ -213,6 +153,7 @@ impl BlobClient {
         Ok(Self {
             endpoint: snapshot_endpoint,
             pipeline: self.pipeline.clone(),
+            session_options: self.session_options.clone(),
             version: self.version.clone(),
             tracer: self.tracer.clone(),
         })
@@ -256,6 +197,7 @@ impl BlobClient {
         let inner_client = GeneratedBlobClient {
             endpoint: self.endpoint.clone(),
             pipeline: self.pipeline.clone(),
+            session_options: self.session_options.clone(),
             version: self.version.clone(),
             tracer: self.tracer.clone(),
         };
@@ -300,6 +242,7 @@ impl BlobClient {
         let inner_client = GeneratedBlobClient {
             endpoint: self.endpoint.clone(),
             pipeline: self.pipeline.clone(),
+            session_options: self.session_options.clone(),
             version: self.version.clone(),
             tracer: self.tracer.clone(),
         };
