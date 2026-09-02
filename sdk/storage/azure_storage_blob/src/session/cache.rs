@@ -32,6 +32,15 @@ pub(crate) trait ExpiringValue: Clone + Send + Sync + 'static {
     /// The instant at which the value is no longer usable and must be
     /// re-acquired in the foreground.
     fn expires_on(&self) -> OffsetDateTime;
+
+    /// Whether this value may replace a still-valid value after a proactive
+    /// background refresh.
+    fn replaces_current(&self) -> bool {
+        true
+    }
+
+    /// Returns this value with a new proactive refresh time.
+    fn with_refresh_on(&self, refresh_on: OffsetDateTime) -> Self;
 }
 
 /// A factory that asynchronously acquires a fresh value.
@@ -52,12 +61,12 @@ enum Decision {
 }
 
 fn decide<T: ExpiringValue>(value: &T, now: OffsetDateTime) -> Decision {
-    if now < value.refresh_on() {
-        Decision::Fresh
-    } else if now < value.expires_on() {
-        Decision::Stale
-    } else {
+    if now >= value.expires_on() {
         Decision::Expired
+    } else if now < value.refresh_on() {
+        Decision::Fresh
+    } else {
+        Decision::Stale
     }
 }
 
@@ -82,7 +91,7 @@ impl<T> Clone for AutoRefreshingCache<T> {
     }
 }
 
-impl<T: ExpiringValue> AutoRefreshingCache<T> {
+impl<T: ExpiringValue + PartialEq> AutoRefreshingCache<T> {
     /// Creates a cache that acquires values with `acquire`, refreshing in the
     /// background up to `background_timeout` before giving up and keeping the
     /// current value.
@@ -117,7 +126,7 @@ impl<T: ExpiringValue> AutoRefreshingCache<T> {
                     Decision::Stale => {
                         let current = value.clone();
                         drop(guard);
-                        self.trigger_background_refresh();
+                        self.trigger_background_refresh(current.clone());
                         return Ok(current);
                     }
                     Decision::Expired => {}
@@ -156,7 +165,7 @@ impl<T: ExpiringValue> AutoRefreshingCache<T> {
 
     /// Spawns at most one background refresh. On success the new value replaces
     /// the current one; on failure or timeout the current value is kept.
-    fn trigger_background_refresh(&self) {
+    fn trigger_background_refresh(&self, current: T) {
         if self.shared.refreshing.swap(true, Ordering::AcqRel) {
             return;
         }
@@ -167,7 +176,14 @@ impl<T: ExpiringValue> AutoRefreshingCache<T> {
             let timeout = get_async_runtime().sleep(shared.background_timeout);
             if let Either::Left((Ok(value), _)) = future::select(acquire, timeout).await {
                 let mut guard = shared.value.lock().await;
-                *guard = Some(value);
+                if guard.as_ref() == Some(&current) {
+                    if value.replaces_current() {
+                        *guard = Some(value);
+                    } else {
+                        let refresh_on = value.expires_on().min(current.expires_on());
+                        *guard = Some(current.with_refresh_on(refresh_on));
+                    }
+                }
             }
             shared.refreshing.store(false, Ordering::Release);
         }));
@@ -177,17 +193,25 @@ impl<T: ExpiringValue> AutoRefreshingCache<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicI64, AtomicUsize};
+    use futures::channel::oneshot;
+    use std::{
+        collections::VecDeque,
+        sync::{
+            atomic::{AtomicI64, AtomicUsize},
+            Mutex as StdMutex,
+        },
+    };
 
     const BASE_UNIX: i64 = 1_700_000_000;
     const REFRESH_AFTER: i64 = 100;
     const EXPIRE_AFTER: i64 = 200;
 
-    #[derive(Clone, PartialEq)]
+    #[derive(Clone, Debug, PartialEq)]
     struct TestValue {
         id: usize,
         refresh_on: OffsetDateTime,
         expires_on: OffsetDateTime,
+        replaces_current: bool,
     }
 
     impl ExpiringValue for TestValue {
@@ -196,6 +220,15 @@ mod tests {
         }
         fn expires_on(&self) -> OffsetDateTime {
             self.expires_on
+        }
+        fn replaces_current(&self) -> bool {
+            self.replaces_current
+        }
+        fn with_refresh_on(&self, refresh_on: OffsetDateTime) -> Self {
+            Self {
+                refresh_on,
+                ..self.clone()
+            }
         }
     }
 
@@ -228,6 +261,7 @@ mod tests {
                         id,
                         refresh_on: now + Duration::seconds(REFRESH_AFTER),
                         expires_on: now + Duration::seconds(EXPIRE_AFTER),
+                        replaces_current: true,
                     })
                 })
             });
@@ -265,7 +299,35 @@ mod tests {
             id,
             refresh_on: base + Duration::seconds(refresh_offset),
             expires_on: base + Duration::seconds(expire_offset),
+            replaces_current: true,
         }
+    }
+
+    fn controlled_cache(
+        offset: Arc<AtomicI64>,
+        count: Arc<AtomicUsize>,
+        receivers: Vec<oneshot::Receiver<TestValue>>,
+    ) -> AutoRefreshingCache<TestValue> {
+        let clock: ClockFn = Arc::new(move || {
+            OffsetDateTime::from_unix_timestamp(BASE_UNIX + offset.load(Ordering::SeqCst)).unwrap()
+        });
+        let receivers = Arc::new(StdMutex::new(VecDeque::from(receivers)));
+        let acquire: AcquireFn<TestValue> = Arc::new(move || {
+            count.fetch_add(1, Ordering::SeqCst);
+            let receiver = receivers.lock().unwrap().pop_front().unwrap();
+            Box::pin(async move { Ok(receiver.await.unwrap()) })
+        });
+        AutoRefreshingCache::with_clock(acquire, Duration::seconds(30), clock)
+    }
+
+    async fn await_refresh(cache: &AutoRefreshingCache<TestValue>) {
+        for _ in 0..200 {
+            if !cache.shared.refreshing.load(Ordering::Acquire) {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+        panic!("background refresh did not finish");
     }
 
     #[test]
@@ -330,6 +392,73 @@ mod tests {
         // The background refresh eventually acquires a new value.
         await_count(&harness, 2).await;
         assert_eq!(cache.get().await.unwrap().id, 2);
+    }
+
+    #[tokio::test]
+    async fn late_background_result_does_not_replace_newer_foreground_value() {
+        let offset = Arc::new(AtomicI64::new(150));
+        let count = Arc::new(AtomicUsize::new(0));
+        let (background_sender, background_receiver) = oneshot::channel();
+        let (foreground_sender, foreground_receiver) = oneshot::channel();
+        let cache = controlled_cache(
+            offset.clone(),
+            count.clone(),
+            vec![background_receiver, foreground_receiver],
+        );
+        *cache.shared.value.lock().await = Some(value(1, 100, 200));
+
+        assert_eq!(cache.get().await.unwrap().id, 1);
+        while count.load(Ordering::SeqCst) < 1 {
+            tokio::task::yield_now().await;
+        }
+
+        offset.store(201, Ordering::SeqCst);
+        let foreground = tokio::spawn({
+            let cache = cache.clone();
+            async move { cache.get().await.unwrap() }
+        });
+        while count.load(Ordering::SeqCst) < 2 {
+            tokio::task::yield_now().await;
+        }
+        foreground_sender.send(value(3, 300, 400)).unwrap();
+        assert_eq!(foreground.await.unwrap().id, 3);
+
+        background_sender.send(value(2, 250, 350)).unwrap();
+        await_refresh(&cache).await;
+        assert_eq!(cache.get().await.unwrap().id, 3);
+    }
+
+    #[tokio::test]
+    async fn background_fallback_retains_current_and_defers_refresh() {
+        let offset = Arc::new(AtomicI64::new(150));
+        let count = Arc::new(AtomicUsize::new(0));
+        let (fallback_sender, fallback_receiver) = oneshot::channel();
+        let (_next_sender, next_receiver) = oneshot::channel();
+        let cache = controlled_cache(
+            offset.clone(),
+            count.clone(),
+            vec![fallback_receiver, next_receiver],
+        );
+        *cache.shared.value.lock().await = Some(value(1, 100, 200));
+
+        assert_eq!(cache.get().await.unwrap().id, 1);
+        while count.load(Ordering::SeqCst) < 1 {
+            tokio::task::yield_now().await;
+        }
+        let mut fallback = value(2, 180, 180);
+        fallback.replaces_current = false;
+        fallback_sender.send(fallback).unwrap();
+        await_refresh(&cache).await;
+
+        offset.store(179, Ordering::SeqCst);
+        assert_eq!(cache.get().await.unwrap().id, 1);
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+
+        offset.store(181, Ordering::SeqCst);
+        assert_eq!(cache.get().await.unwrap().id, 1);
+        while count.load(Ordering::SeqCst) < 2 {
+            tokio::task::yield_now().await;
+        }
     }
 
     #[tokio::test]

@@ -246,6 +246,68 @@ async fn comp_operation_falls_back_to_bearer(ctx: TestContext) -> Result<(), Box
 }
 
 #[recorded::test]
+async fn sessions_are_cached_per_container(ctx: TestContext) -> Result<(), Box<dyn Error>> {
+    let recording = ctx.recording();
+    let counts = Arc::new(SessionAuthCounts::default());
+    let policy = Arc::new(SessionAuthCountingPolicy {
+        counts: counts.clone(),
+    });
+
+    let service = session_service_client(recording, SessionMode::Enabled, policy).await?;
+    let first_container = service.blob_container_client(&common::get_container_name(recording));
+    let second_container = service.blob_container_client(&common::get_container_name(recording));
+    first_container.create(None).await?;
+    second_container.create(None).await?;
+
+    let first_blob = first_container.blob_client(&common::get_blob_name(recording));
+    let second_blob = second_container.blob_client(&common::get_blob_name(recording));
+    let first_data = b"first container session payload".to_vec();
+    let second_data = b"second container session payload".to_vec();
+    common::create_test_blob(
+        &first_blob,
+        Some(RequestContent::from(first_data.clone())),
+        None,
+    )
+    .await?;
+    common::create_test_blob(
+        &second_blob,
+        Some(RequestContent::from(second_data.clone())),
+        None,
+    )
+    .await?;
+
+    for (blob, expected) in [
+        (&first_blob, first_data.as_slice()),
+        (&second_blob, second_data.as_slice()),
+        (&first_blob, first_data.as_slice()),
+        (&second_blob, second_data.as_slice()),
+    ] {
+        let mut buffer = vec![0u8; expected.len()];
+        blob.download_into(&mut buffer, None).await?;
+        assert_eq!(buffer, expected);
+    }
+
+    assert_eq!(
+        counts.create_session.load(Ordering::SeqCst),
+        2,
+        "each container should mint one session and reuse it"
+    );
+    assert!(
+        counts.session_get.load(Ordering::SeqCst) >= 4,
+        "all four downloads should use session authentication"
+    );
+    assert_eq!(
+        counts.non_get_session.load(Ordering::SeqCst),
+        0,
+        "non-GET requests must not use session authentication"
+    );
+
+    first_container.delete(None).await?;
+    second_container.delete(None).await?;
+    Ok(())
+}
+
+#[recorded::test]
 async fn shared_provider_reuses_session_across_clients(
     ctx: TestContext,
 ) -> Result<(), Box<dyn Error>> {

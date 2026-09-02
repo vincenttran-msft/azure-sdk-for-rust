@@ -4,6 +4,7 @@
 //! Configuration for session token authentication.
 
 use crate::session::provider::SessionProvider;
+use azure_core::fmt::SafeDebug;
 use std::sync::Arc;
 
 /// Determines whether blob operations use session token authentication.
@@ -36,9 +37,10 @@ impl SessionMode {
 ///
 /// Session token authentication currently applies only to blob download
 /// operations authenticated with a [`TokenCredential`](azure_core::credentials::TokenCredential).
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default, SafeDebug)]
 pub struct SessionOptions {
     /// The session authentication mode. Defaults to [`SessionMode::Auto`].
+    #[safe(true)]
     pub mode: SessionMode,
 
     /// The account name used to sign session requests.
@@ -95,5 +97,18 @@ mod tests {
             ..Default::default()
         }
         .is_enabled());
+    }
+
+    #[test]
+    fn debug_redacts_account_name() {
+        let options = SessionOptions {
+            mode: SessionMode::Enabled,
+            account_name: Some("sensitive-account".into()),
+            ..Default::default()
+        };
+
+        let debug = format!("{options:?}");
+        assert_eq!(debug, "SessionOptions { mode: Enabled, .. }");
+        assert!(!debug.contains("sensitive-account"));
     }
 }

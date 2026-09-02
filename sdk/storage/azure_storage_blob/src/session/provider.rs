@@ -138,6 +138,15 @@ impl ExpiringValue for SessionTokenInfo {
     fn expires_on(&self) -> OffsetDateTime {
         self.expires_on
     }
+    fn replaces_current(&self) -> bool {
+        !self.is_fallback_to_bearer
+    }
+    fn with_refresh_on(&self, refresh_on: OffsetDateTime) -> Self {
+        Self {
+            refresh_on,
+            ..self.clone()
+        }
+    }
 }
 
 /// Two sessions are equal when they carry the same token, so the cache can tell
