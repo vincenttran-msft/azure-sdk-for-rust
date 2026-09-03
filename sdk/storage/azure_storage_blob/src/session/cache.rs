@@ -1,13 +1,13 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-//! A single-flight, auto-refreshing cache for a value that expires.
+//! An auto-refreshing cache with single-flight foreground acquisition.
 //!
-//! One cache instance holds one value (a session for a single container). It
-//! acquires the value on first use, reuses it until a refresh window opens,
+//! One cache instance holds one value (a session for a single container).
+//! It acquires the value on first use, reuses it until a refresh window opens,
 //! then proactively refreshes it in the background while still serving the
-//! current value. Concurrent callers share a single in-flight acquisition, so a
-//! cold cache issues exactly one acquire no matter how many callers race.
+//! current value. Concurrent foreground callers share a single acquisition, so
+//! a cold or expired cache issues one foreground acquire even when callers race.
 
 use azure_core::{
     async_runtime::get_async_runtime,
@@ -33,8 +33,8 @@ pub(crate) trait ExpiringValue: Clone + Send + Sync + 'static {
     /// re-acquired in the foreground.
     fn expires_on(&self) -> OffsetDateTime;
 
-    /// Whether this value may replace a still-valid value after a proactive
-    /// background refresh.
+    /// Whether a value returned by a background refresh may replace the
+    /// still-valid value that triggered that refresh.
     fn replaces_current(&self) -> bool {
         true
     }
@@ -52,11 +52,12 @@ type ClockFn = Arc<dyn Fn() -> OffsetDateTime + Send + Sync>;
 /// What to do with the currently cached value given the current time.
 #[derive(Debug, PartialEq, Eq)]
 enum Decision {
-    /// Within the refresh window; use as-is.
+    /// Before the refresh window opens; use the value as-is.
     Fresh,
-    /// Past the refresh window but still valid; use it and refresh in the background.
+    /// The refresh window is open, but the value remains usable; serve it and
+    /// refresh in the background.
     Stale,
-    /// Expired or absent; a foreground acquisition is required.
+    /// The value has expired; acquire a replacement in the foreground.
     Expired,
 }
 
@@ -78,7 +79,7 @@ struct Shared<T> {
     clock: ClockFn,
 }
 
-/// A single-flight, auto-refreshing cache. Cheap to clone; clones share state.
+/// An auto-refreshing cache with single-flight foreground acquisition.
 pub(crate) struct AutoRefreshingCache<T> {
     shared: Arc<Shared<T>>,
 }
@@ -92,8 +93,8 @@ impl<T> Clone for AutoRefreshingCache<T> {
 }
 
 impl<T: ExpiringValue + PartialEq> AutoRefreshingCache<T> {
-    /// Creates a cache that acquires values with `acquire`, refreshing in the
-    /// background up to `background_timeout` before giving up and keeping the
+    /// Creates a cache that acquires values with `acquire`. Background refreshes
+    /// run for at most `background_timeout`; failures and timeouts retain the
     /// current value.
     pub(crate) fn new(acquire: AcquireFn<T>, background_timeout: Duration) -> Self {
         Self::with_clock(
@@ -163,23 +164,29 @@ impl<T: ExpiringValue + PartialEq> AutoRefreshingCache<T> {
         Ok(value)
     }
 
-    /// Spawns at most one background refresh. On success the new value replaces
-    /// the current one; on failure or timeout the current value is kept.
+    /// Spawns at most one background refresh. A successful replacing value is
+    /// published only if the cache still contains `current`. A non-replacing
+    /// result retains `current` and defers its next refresh. Failures and timeouts
+    /// leave the cache unchanged.
     fn trigger_background_refresh(&self, current: T) {
+        // Atomically claim the single background-refresh slot.
         if self.shared.refreshing.swap(true, Ordering::AcqRel) {
             return;
         }
         let shared = self.shared.clone();
-        // Detached: the refresh runs to completion independently of any caller.
+        // Detached from the requesting caller; completion is bounded by the timeout.
         let _refresh = get_async_runtime().spawn(Box::pin(async move {
             let acquire = (shared.acquire)();
             let timeout = get_async_runtime().sleep(shared.background_timeout);
             if let Either::Left((Ok(value), _)) = future::select(acquire, timeout).await {
                 let mut guard = shared.value.lock().await;
+                // Publish only if no foreground acquisition or invalidation replaced `current`.
                 if guard.as_ref() == Some(&current) {
                     if value.replaces_current() {
                         *guard = Some(value);
                     } else {
+                        // Keep the usable value, but defer retries until the fallback cooldown
+                        // ends or the current value expires, whichever comes first.
                         let refresh_on = value.expires_on().min(current.expires_on());
                         *guard = Some(current.with_refresh_on(refresh_on));
                     }
@@ -347,7 +354,7 @@ mod tests {
         assert_eq!(first.id, 1);
         assert_eq!(harness.acquire_count(), 1);
 
-        // Still within the fresh window: no new acquire.
+        // Before the refresh window opens: no new acquire.
         let second = cache.get().await.unwrap();
         assert_eq!(second.id, 1);
         assert_eq!(harness.acquire_count(), 1);

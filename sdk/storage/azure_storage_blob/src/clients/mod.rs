@@ -8,7 +8,7 @@ use azure_core::{
     http::{
         new_http_client,
         policies::{auth::BearerTokenAuthorizationPolicy, Policy},
-        ClientOptions, HttpClientOptions, Transport, Url,
+        ClientOptions, HttpClientOptions, Pipeline, Transport, Url,
     },
     Result,
 };
@@ -51,14 +51,50 @@ fn apply_client_defaults(options: &mut ClientOptions) {
     apply_storage_logging_defaults(options);
 }
 
+/// Builds a client pipeline while preserving the original options for the
+/// session provider's own client before applying defaults to this client.
+fn build_pipeline(
+    endpoint: &Url,
+    credential: Option<Arc<dyn TokenCredential>>,
+    session_options: Option<&SessionOptions>,
+    client_options: &mut ClientOptions,
+    version: &str,
+) -> Result<Pipeline> {
+    let default_session_options = SessionOptions::default();
+    let session_options = session_options.unwrap_or(&default_session_options);
+    let per_retry_policies = build_auth_policies(
+        endpoint,
+        credential,
+        session_options,
+        client_options,
+        version,
+    )?;
+    apply_client_defaults(client_options);
+
+    Ok(Pipeline::new(
+        option_env!("CARGO_PKG_NAME"),
+        option_env!("CARGO_PKG_VERSION"),
+        client_options.clone(),
+        Vec::default(),
+        per_retry_policies,
+        None,
+    ))
+}
+
 /// Builds the per-retry authentication policies for a client.
 ///
-/// With no credential there are none. With a credential, the bearer token
-/// policy is used, wrapped by the [`SessionAuthenticationPolicy`] when session
-/// authentication is enabled so eligible downloads can use a session token.
+/// The resulting policy path depends on the supplied credential and session
+/// configuration:
 ///
-/// The `client_options` and `version` are those of the constructing client,
-/// used to build the session provider's own session-free service client.
+/// - Without a credential, no authentication policy is added.
+/// - With a credential and sessions disabled, bearer authentication is used.
+/// - With a credential and sessions enabled, session authentication wraps the
+///   bearer policy so eligible downloads use session credentials and other
+///   requests can continue using bearer authentication.
+///
+/// When session authentication is enabled without an explicit provider,
+/// `client_options` and `version` are used to construct a session-free service
+/// client that acquires and refreshes session credentials.
 fn build_auth_policies(
     endpoint: &Url,
     credential: Option<Arc<dyn TokenCredential>>,
@@ -68,9 +104,11 @@ fn build_auth_policies(
 ) -> Result<Vec<Arc<dyn Policy>>> {
     let mut per_retry_policies: Vec<Arc<dyn Policy>> = Vec::default();
 
+    // Anonymous and SAS-based clients do not need an authentication policy.
     let Some(credential) = credential else {
         return Ok(per_retry_policies);
     };
+
     if !endpoint.scheme().starts_with("https") {
         return Err(azure_core::Error::with_message(
             azure_core::error::ErrorKind::Other,
@@ -83,37 +121,34 @@ fn build_auth_policies(
         vec![STORAGE_SCOPE],
     ));
 
+    // Use the existing bearer-only path when sessions are disabled.
     if !session_options.is_enabled() {
         per_retry_policies.push(bearer);
         return Ok(per_retry_policies);
     }
 
-    // Session signing needs an account name, resolved once here. Mirror the
-    // service SDK: fail fast when explicitly enabled but unresolvable, or quietly
-    // fall back to bearer when sessions are enabled only by default.
+    // Session signing requires a storage account name. If sessions were explicitly
+    // enabled, fail when it cannot be resolved; otherwise, preserve bearer authentication.
     let Some(account) = resolve_session_account(endpoint, session_options) else {
-        let endpoint = endpoint_for_log(endpoint);
+        let endpoint = endpoint_for_logging(endpoint);
         if session_options.is_explicitly_enabled() {
-            tracing::warn!(
-                %endpoint,
-                "session authentication cannot be enabled: the storage account name could not be determined"
-            );
             return Err(azure_core::Error::with_message(
                 azure_core::error::ErrorKind::Other,
                 format!(
-                    "the storage account name is required to enable session authentication \
-                     but could not be determined from {endpoint}; set SessionOptions::account_name"
+                    "session authentication requires a storage account name, but one could not \
+                     be determined from {endpoint}; set SessionOptions::account_name"
                 ),
             ));
         }
         tracing::warn!(
             %endpoint,
-            "session authentication disabled: the storage account name could not be determined"
+            "session authentication unavailable because the storage account name could not be determined; falling back to bearer authentication"
         );
         per_retry_policies.push(bearer);
         return Ok(per_retry_policies);
     };
 
+    // Reuse an injected provider, or create a session-free client to acquire sessions.
     let provider: Arc<dyn SessionProvider> = match &session_options.session_provider {
         Some(provider) => provider.clone(),
         None => {
@@ -134,6 +169,7 @@ fn build_auth_policies(
     Ok(per_retry_policies)
 }
 
+// TODO: Still need to harden as our parsing is not as robust as .NET implementation.
 /// Resolves the account name used to sign session requests: the configured
 /// account name, or the first label of the endpoint host.
 fn resolve_session_account(endpoint: &Url, options: &SessionOptions) -> Option<String> {
@@ -152,7 +188,7 @@ fn resolve_session_account(endpoint: &Url, options: &SessionOptions) -> Option<S
 
 /// Reduces `endpoint` to scheme, host, and path for logging, dropping any query
 /// string so a SAS token is never recorded.
-fn endpoint_for_log(endpoint: &Url) -> String {
+fn endpoint_for_logging(endpoint: &Url) -> String {
     let mut endpoint = endpoint.clone();
     endpoint.set_query(None);
     endpoint.set_fragment(None);
@@ -365,11 +401,11 @@ mod tests {
     }
 
     #[test]
-    fn endpoint_for_log_strips_query_and_fragment() {
+    fn endpoint_for_logging_strips_query_and_fragment() {
         let url =
             Url::parse("https://myaccount.blob.core.windows.net/c/b?sig=secret#frag").unwrap();
         assert_eq!(
-            endpoint_for_log(&url),
+            endpoint_for_logging(&url),
             "https://myaccount.blob.core.windows.net/c/b"
         );
     }

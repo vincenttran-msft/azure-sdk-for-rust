@@ -169,8 +169,8 @@ mod tests {
 
     #[test]
     fn authorization_is_not_logged() {
-        // Session credentials ride in the `authorization` header; it must never be
-        // allowlisted, so the logging policy redacts it.
+        // The `authorization` header carries bearer or session credentials, so it
+        // must remain outside the allowlist and be redacted by the logging policy.
         assert!(!STORAGE_ALLOWED_HEADERS
             .iter()
             .any(|h| h.eq_ignore_ascii_case("authorization")));

@@ -17,7 +17,7 @@ use crate::{
 use async_trait::async_trait;
 use azure_core::{
     credentials::TokenCredential,
-    http::{Body, NoFormat, Pipeline, RequestContent, Url},
+    http::{Body, NoFormat, RequestContent, Url},
     tracing, Bytes, Result, Uuid,
 };
 use futures::lock::Mutex;
@@ -47,26 +47,13 @@ impl BlockBlobClient {
         }
 
         let mut options = options.unwrap_or_default();
-        let session_options = options.session_options.clone().unwrap_or_default();
-        // Build auth policies from the pre-default options so the session provider's
-        // own service client applies its defaults exactly once.
-        let per_retry_policies = super::build_auth_policies(
+        let pipeline = super::build_pipeline(
             &blob_url,
             credential,
-            &session_options,
-            &options.client_options,
+            options.session_options.as_ref(),
+            &mut options.client_options,
             &options.version,
         )?;
-        super::apply_client_defaults(&mut options.client_options);
-
-        let pipeline = Pipeline::new(
-            option_env!("CARGO_PKG_NAME"),
-            option_env!("CARGO_PKG_VERSION"),
-            options.client_options.clone(),
-            Vec::default(),
-            per_retry_policies,
-            None,
-        );
 
         Ok(Self {
             endpoint: blob_url,
