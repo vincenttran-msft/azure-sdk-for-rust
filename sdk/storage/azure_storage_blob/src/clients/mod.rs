@@ -12,7 +12,10 @@ use azure_core::{
     },
     Result,
 };
-use std::sync::Arc;
+use std::{
+    net::{Ipv4Addr, Ipv6Addr},
+    sync::Arc,
+};
 
 use crate::{
     logging::apply_storage_logging_defaults,
@@ -169,21 +172,35 @@ fn build_auth_policies(
     Ok(per_retry_policies)
 }
 
-// TODO: Still need to harden as our parsing is not as robust as .NET implementation.
 /// Resolves the account name used to sign session requests: the configured
-/// account name, or the first label of the endpoint host.
+/// account name, or one derived from the endpoint.
 fn resolve_session_account(endpoint: &Url, options: &SessionOptions) -> Option<String> {
     if let Some(account) = options.account_name.as_deref() {
         if !account.is_empty() {
             return Some(account.to_string());
         }
     }
-    endpoint
-        .host_str()?
-        .split('.')
+    let host = endpoint.host_str()?;
+    if host_is_ip_literal(host) {
+        return endpoint
+            .path_segments()?
+            .find(|segment| !segment.is_empty())
+            .map(str::to_string);
+    }
+    host.split('.')
         .next()
         .filter(|label| !label.is_empty())
         .map(str::to_string)
+}
+
+/// Whether `host` (as returned by [`Url::host_str`]) is an IPv4 or bracketed
+/// IPv6 literal, which denotes a path-style endpoint such as the local emulator.
+fn host_is_ip_literal(host: &str) -> bool {
+    host.parse::<Ipv4Addr>().is_ok()
+        || host
+            .strip_prefix('[')
+            .and_then(|inner| inner.strip_suffix(']'))
+            .is_some_and(|inner| inner.parse::<Ipv6Addr>().is_ok())
 }
 
 /// Reduces `endpoint` to scheme, host, and path for logging, dropping any query
@@ -398,6 +415,59 @@ mod tests {
             resolve_session_account(&endpoint(), &options).as_deref(),
             Some("myaccount")
         );
+    }
+
+    #[test]
+    fn resolve_session_account_uses_path_segment_for_ip_host() {
+        let options = SessionOptions {
+            mode: SessionMode::Enabled,
+            account_name: None,
+            ..Default::default()
+        };
+        let endpoint = Url::parse("https://127.0.0.1:10000/devstoreaccount1/c/b").unwrap();
+        assert_eq!(
+            resolve_session_account(&endpoint, &options).as_deref(),
+            Some("devstoreaccount1")
+        );
+    }
+
+    #[test]
+    fn resolve_session_account_uses_path_segment_for_ipv6_host() {
+        let options = SessionOptions {
+            mode: SessionMode::Enabled,
+            account_name: None,
+            ..Default::default()
+        };
+        let endpoint = Url::parse("https://[::1]:10000/devstoreaccount1/c/b").unwrap();
+        assert_eq!(
+            resolve_session_account(&endpoint, &options).as_deref(),
+            Some("devstoreaccount1")
+        );
+    }
+
+    #[test]
+    fn resolve_session_account_configured_name_wins_over_ip_host() {
+        let options = SessionOptions {
+            mode: SessionMode::Enabled,
+            account_name: Some("explicit".into()),
+            ..Default::default()
+        };
+        let endpoint = Url::parse("https://127.0.0.1:10000/devstoreaccount1").unwrap();
+        assert_eq!(
+            resolve_session_account(&endpoint, &options).as_deref(),
+            Some("explicit")
+        );
+    }
+
+    #[test]
+    fn resolve_session_account_none_for_ip_host_without_path() {
+        let options = SessionOptions {
+            mode: SessionMode::Enabled,
+            account_name: None,
+            ..Default::default()
+        };
+        let endpoint = Url::parse("https://127.0.0.1/").unwrap();
+        assert_eq!(resolve_session_account(&endpoint, &options), None);
     }
 
     #[test]
