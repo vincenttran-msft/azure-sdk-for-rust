@@ -5,18 +5,19 @@ mod common;
 
 use async_trait::async_trait;
 use azure_core::{
-    credentials::Secret,
+    credentials::TokenCredential,
     error::ErrorKind,
     http::{
         headers::{HeaderName, Headers, CONTENT_TYPE},
         policies::{Policy, PolicyResult},
-        AsyncRawResponse, ClientOptions, Context, FixedRetryOptions, Method, Request,
-        RequestContent, RetryOptions, StatusCode, Transport, Url, XmlFormat,
+        AsyncRawResponse, ClientOptions, Context, Method, Request, RequestContent, StatusCode,
+        Transport, Url, XmlFormat,
     },
-    time::{parse_rfc3339, to_rfc3339, to_rfc7231, OffsetDateTime},
+    time::{parse_rfc3339, to_rfc3339, OffsetDateTime},
     Bytes,
 };
 use azure_core_test::{http::MockHttpClient, recorded, Matcher, TestContext, TestMode, VarOptions};
+use azure_identity::DeveloperToolsCredential;
 use azure_storage_blob::{
     models::{
         AccessTier, AccountKind, BlobClientAcquireLeaseOptions,
@@ -41,7 +42,7 @@ use flate2::{write::GzEncoder, Compression};
 use futures::{FutureExt as _, TryStreamExt};
 use std::{
     cmp::min,
-    collections::{BTreeMap, HashMap},
+    collections::HashMap,
     error::Error,
     io::Write,
     num::NonZero,
@@ -1486,191 +1487,20 @@ fn parse_bytes_range(range: &str) -> (usize, usize) {
     )
 }
 
-/// Test-only Shared Key authorization policy for running live against accounts
-/// that only accept Shared Key (e.g. pre-production, where the Data Locality
-/// preview lives). The shipped client intentionally omits Shared Key support, so
-/// this stays in tests.
-#[derive(Debug)]
-struct SharedKeyAuthPolicy {
-    account: String,
-    key: Secret,
-}
-
-#[async_trait]
-impl Policy for SharedKeyAuthPolicy {
-    async fn send(
-        &self,
-        ctx: &Context,
-        request: &mut Request,
-        next: &[Arc<dyn Policy>],
-    ) -> PolicyResult {
-        request.insert_header("x-ms-date", to_rfc7231(&OffsetDateTime::now_utc()));
-
-        let string_to_sign = {
-            let headers = request.headers();
-            let header = |name: &str| {
-                headers
-                    .get_optional_str(&HeaderName::from(name.to_owned()))
-                    .unwrap_or_default()
-                    .to_owned()
-            };
-            // Content-Length is signed as empty when zero (service version 2015-02-21+).
-            let content_length = header("content-length");
-            let content_length = if content_length == "0" {
-                String::new()
-            } else {
-                content_length
-            };
-            format!(
-                "{method}\n{content_encoding}\n{content_language}\n{content_length}\n{content_md5}\n{content_type}\n\n{if_modified_since}\n{if_match}\n{if_none_match}\n{if_unmodified_since}\n{range}\n{canonicalized_headers}{canonicalized_resource}",
-                method = request.method().as_str(),
-                content_encoding = header("content-encoding"),
-                content_language = header("content-language"),
-                content_md5 = header("content-md5"),
-                content_type = header("content-type"),
-                if_modified_since = header("if-modified-since"),
-                if_match = header("if-match"),
-                if_none_match = header("if-none-match"),
-                if_unmodified_since = header("if-unmodified-since"),
-                range = header("range"),
-                canonicalized_headers = shared_key_canonicalized_headers(headers),
-                canonicalized_resource =
-                    shared_key_canonicalized_resource(request.url(), &self.account),
-            )
-        };
-
-        let signature = azure_core::hmac::hmac_sha256(&string_to_sign, &self.key)?;
-        request.insert_header(
-            "authorization",
-            format!("SharedKey {}:{}", self.account, signature),
-        );
-
-        next[0].send(ctx, request, &next[1..]).await
+/// Builds the target blob URL for the live layout-routing test from the standard
+/// `AZURE_STORAGE_ACCOUNT_NAME` variable (the same one the recorded tests use),
+/// returning `None` (so the test is skipped) when it is unset or blank. The blob
+/// lives in a dedicated `layout-routing-test` container that the test creates.
+fn live_layout_blob_url() -> Option<Url> {
+    let account = std::env::var("AZURE_STORAGE_ACCOUNT_NAME").ok()?;
+    let account = account.trim().trim_matches('"').trim();
+    if account.is_empty() {
+        return None;
     }
-}
-
-/// Canonicalizes the `x-ms-*` request headers for the Shared Key string-to-sign.
-fn shared_key_canonicalized_headers(headers: &Headers) -> String {
-    let mut entries: BTreeMap<String, String> = BTreeMap::new();
-    for (name, value) in headers.iter() {
-        let name = name.as_str().to_ascii_lowercase();
-        if name.starts_with("x-ms-") {
-            entries.insert(name, value.as_str().trim().to_owned());
-        }
-    }
-    let mut result = String::new();
-    for (name, value) in entries {
-        result.push_str(&name);
-        result.push(':');
-        result.push_str(&value);
-        result.push('\n');
-    }
-    result
-}
-
-/// Canonicalizes the resource path and query for the Shared Key string-to-sign.
-///
-/// Uses the stored account name rather than the request host, so the signature is
-/// host-independent — which is what lets locality routing rewrite the host safely.
-fn shared_key_canonicalized_resource(url: &Url, account: &str) -> String {
-    let mut result = format!("/{}{}", account, url.path());
-    let mut params: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for (name, value) in url.query_pairs() {
-        params
-            .entry(name.into_owned().to_ascii_lowercase())
-            .or_default()
-            .push(value.into_owned());
-    }
-    for (name, mut values) in params {
-        values.sort();
-        result.push('\n');
-        result.push_str(&name);
-        result.push(':');
-        result.push_str(&values.join(","));
-    }
-    result
-}
-
-/// Builds the Shared Key test client options (a per-try [`SharedKeyAuthPolicy`]).
-fn shared_key_client_options(account: &str, key: &str) -> ClientOptions {
-    let policy: Arc<dyn Policy> = Arc::new(SharedKeyAuthPolicy {
-        account: account.to_owned(),
-        key: Secret::new(key.to_owned()),
-    });
-    ClientOptions {
-        per_try_policies: vec![policy],
-        // Fail fast on connection errors instead of spending ~80s retrying an
-        // unreachable endpoint while iterating on the live test.
-        retry: RetryOptions::fixed(FixedRetryOptions {
-            max_retries: 0,
-            ..Default::default()
-        }),
-        ..Default::default()
-    }
-}
-
-/// Builds a Shared Key–authenticated [`BlobClient`] (test-only).
-fn shared_key_blob_client(
-    url: Url,
-    account: &str,
-    key: &str,
-) -> Result<BlobClient, Box<dyn Error>> {
-    Ok(BlobClient::new(
-        url,
-        None,
-        Some(BlobClientOptions {
-            client_options: shared_key_client_options(account, key),
-            ..Default::default()
-        }),
-    )?)
-}
-
-/// Resolves the configured blob URL: prepends `https://` when no scheme is given
-/// and fills in a default container and/or blob when the path omits them, so the
-/// value may be just the account endpoint.
-fn normalize_blob_url(value: &str) -> Result<Url, Box<dyn Error>> {
-    const DEFAULT_CONTAINER: &str = "layout-routing-test";
-    const DEFAULT_BLOB: &str = "routing-test-blob";
-
-    let text = if value.contains("://") {
-        value.to_owned()
-    } else {
-        format!("https://{value}")
-    };
-    let mut url = Url::parse(&text).map_err(|e| {
-        format!("AZURE_STORAGE_LAYOUT_BLOB_URL is not a valid URL (got {value:?}): {e}")
-    })?;
-    if url.cannot_be_a_base() {
-        return Err(
-            format!("AZURE_STORAGE_LAYOUT_BLOB_URL must be an https URL (got {value:?})").into(),
-        );
-    }
-
-    let segments: Vec<String> = url
-        .path_segments()
-        .map(|s| s.filter(|p| !p.is_empty()).map(str::to_owned).collect())
-        .unwrap_or_default();
-    match segments.as_slice() {
-        [] => url.set_path(&format!("/{DEFAULT_CONTAINER}/{DEFAULT_BLOB}")),
-        [container] => url.set_path(&format!("/{container}/{DEFAULT_BLOB}")),
-        _ => {} // container and blob already provided
-    }
-    Ok(url)
-}
-
-/// Reads the live Shared Key test configuration from the environment, returning
-/// `None` (so the test is skipped) when any variable is unset or blank. Surrounding
-/// quotes and whitespace are trimmed, tolerating `set VAR="..."` in cmd.
-fn live_shared_key_config() -> Option<(String, String, String)> {
-    fn read(name: &str) -> Option<String> {
-        let value = std::env::var(name).ok()?;
-        let value = value.trim().trim_matches('"').trim().to_owned();
-        (!value.is_empty()).then_some(value)
-    }
-    let blob_url = read("AZURE_STORAGE_LAYOUT_BLOB_URL")?;
-    let account = read("AZURE_STORAGE_ACCOUNT_NAME")?;
-    let key = read("AZURE_STORAGE_ACCOUNT_KEY")?;
-    Some((blob_url, account, key))
+    Url::parse(&format!(
+        "https://{account}.blob.core.windows.net/layout-routing-test/routing-test-blob"
+    ))
+    .ok()
 }
 
 /// Mock-transport test: with routing enabled and the service hinting a layout, the
@@ -1902,30 +1732,85 @@ async fn test_download_layout_aware_routing_skips_without_hint() -> Result<(), B
     Ok(())
 }
 
+/// Per-try policy that records each outgoing request's endpoint host and `Host`
+/// header after any locality rewrite, so the live test can confirm routing engaged.
+#[derive(Debug)]
+struct RoutingObserver {
+    seen: Arc<Mutex<Vec<RoutedRequest>>>,
+}
+
+#[derive(Debug)]
+struct RoutedRequest {
+    is_layout: bool,
+    range: Option<String>,
+    /// Host the request was actually sent to (URL authority after any rewrite).
+    sent_to: Option<String>,
+    /// Original account host, preserved on the `Host` header only when rewritten.
+    original_host: Option<String>,
+    /// The `x-ms-download-hint` the service returned (this is what gates routing).
+    download_hint: Option<String>,
+}
+
+#[async_trait]
+impl Policy for RoutingObserver {
+    async fn send(
+        &self,
+        ctx: &Context,
+        request: &mut Request,
+        next: &[Arc<dyn Policy>],
+    ) -> PolicyResult {
+        let is_layout = request
+            .url()
+            .query()
+            .is_some_and(|query| query.contains("comp=layout"));
+        let range = request
+            .headers()
+            .get_optional_str(&"range".into())
+            .map(str::to_owned);
+        let sent_to = request.url().host_str().map(str::to_owned);
+        let original_host = request
+            .headers()
+            .get_optional_str(&"host".into())
+            .map(str::to_owned);
+        let response = next[0].send(ctx, request, &next[1..]).await?;
+        let download_hint = response
+            .headers()
+            .get_optional_str(&"x-ms-download-hint".into())
+            .map(str::to_owned);
+        self.seen.lock().unwrap().push(RoutedRequest {
+            is_layout,
+            range,
+            sent_to,
+            original_host,
+            download_hint,
+        });
+        Ok(response)
+    }
+}
+
 /// Live-only: runs locality-aware routing downloads against a real account using
-/// Shared Key. The shipped client omits Shared Key, and the Data Locality preview
-/// is only available on pre-production accounts that require Shared Key, so this
-/// test authenticates with a test-only policy and is skipped unless configured:
+/// Entra ID (OAuth) via [`DeveloperToolsCredential`]. Skipped unless the standard
+/// `AZURE_STORAGE_ACCOUNT_NAME` variable is set (the same one the recorded tests
+/// use); the blob is created in a dedicated `layout-routing-test` container.
 ///
-/// - `AZURE_STORAGE_LAYOUT_BLOB_URL` — account endpoint (e.g.
-///   `https://account.blob.core.windows.net`) or a full `.../container/blob` URL; a
-///   default container and blob are filled in when omitted, and the container is
-///   created if it does not exist.
-/// - `AZURE_STORAGE_ACCOUNT_NAME` — account name used to sign requests.
-/// - `AZURE_STORAGE_ACCOUNT_KEY` — base64 account key used to sign requests.
-///
-/// Verifies both `download` and `download_into` return byte-identical data with
-/// `LayoutAwareRouting::Enabled` (routing is a transparent optimization).
-#[tokio::test]
-async fn test_download_layout_aware_routing_live() -> Result<(), Box<dyn Error>> {
-    let Some((blob_url, account, key)) = live_shared_key_config() else {
+/// Requires ambient Entra credentials (e.g. `az login` or a service principal) with
+/// data-plane access to the account. Verifies both `download` and `download_into`
+/// return byte-identical data with `LayoutAwareRouting::Enabled` (routing is a
+/// transparent optimization).
+#[recorded::test(live)]
+async fn test_download_layout_aware_routing() -> Result<(), Box<dyn Error>> {
+    let Some(url) = live_layout_blob_url() else {
         eprintln!(
-            "skipping test_download_layout_aware_routing_live: set AZURE_STORAGE_LAYOUT_BLOB_URL, \
-             AZURE_STORAGE_ACCOUNT_NAME, and AZURE_STORAGE_ACCOUNT_KEY to run it"
+            "skipping test_download_layout_aware_routing: set AZURE_STORAGE_ACCOUNT_NAME to run it"
         );
         return Ok(());
     };
-    let url = normalize_blob_url(&blob_url)?;
+    let credential: Arc<dyn TokenCredential> = DeveloperToolsCredential::new(None)?;
+    let account_host = url.host_str().unwrap_or_default().to_owned();
+    let observed = Arc::new(Mutex::new(Vec::<RoutedRequest>::new()));
+    let observer: Arc<dyn Policy> = Arc::new(RoutingObserver {
+        seen: observed.clone(),
+    });
 
     // Ensure the container exists (idempotent create) before uploading.
     let mut container_url = url.clone();
@@ -1933,33 +1818,42 @@ async fn test_download_layout_aware_routing_live() -> Result<(), Box<dyn Error>>
         .path_segments_mut()
         .expect("blob URL must be a base")
         .pop();
-    let container_client = BlobContainerClient::new(
-        container_url,
-        None,
-        Some(BlobContainerClientOptions {
-            client_options: shared_key_client_options(&account, &key),
-            ..Default::default()
-        }),
-    )?;
+    let container_client = BlobContainerClient::new(container_url, Some(credential.clone()), None)?;
     if let Err(e) = container_client.create(None).await {
         if e.http_status() != Some(StatusCode::Conflict) {
             return Err(e.into());
         }
     }
 
-    let blob_client = shared_key_blob_client(url, &account, &key)?;
+    // Observe the actual outgoing requests via a per-try policy, so it sees each
+    // request after LayoutRoutingPolicy has applied any host rewrite.
+    let blob_client = BlobClient::new(
+        url,
+        Some(credential.clone()),
+        Some(BlobClientOptions {
+            client_options: ClientOptions {
+                per_try_policies: vec![observer],
+                ..Default::default()
+            },
+            ..Default::default()
+        }),
+    )?;
 
-    // Upload enough data to split into multiple routed partitions.
-    let data: Vec<u8> = (0..8 * 1024 * 1024).map(|i| (i % 251) as u8).collect();
+    // Upload a large blob so the service has a chance to spread it across backend
+    // nodes (and thus emit a layout + download hint). Bump this if needed.
+    const BLOB_SIZE: usize = 64 * 1024 * 1024; // 64 MiB
+    let data: Vec<u8> = (0..BLOB_SIZE).map(|i| (i % 251) as u8).collect();
     blob_client
         .upload(RequestContent::from(data.clone()), None)
         .await?;
+    // Only observe the download requests below, not the upload.
+    observed.lock().unwrap().clear();
 
     // download (streaming)
     let body = blob_client
         .download(Some(BlobClientDownloadOptions {
             layout_aware_routing: LayoutAwareRouting::Enabled,
-            partition_size: Some(NonZero::new(1024 * 1024).unwrap()),
+            partition_size: Some(NonZero::new(16 * 1024 * 1024).unwrap()),
             parallel: Some(NonZero::new(4).unwrap()),
             ..Default::default()
         }))
@@ -1976,7 +1870,7 @@ async fn test_download_layout_aware_routing_live() -> Result<(), Box<dyn Error>>
             &mut buffer,
             Some(BlobClientDownloadOptions {
                 layout_aware_routing: LayoutAwareRouting::Enabled,
-                partition_size: Some(NonZero::new(1024 * 1024).unwrap()),
+                partition_size: Some(NonZero::new(16 * 1024 * 1024).unwrap()),
                 parallel: Some(NonZero::new(4).unwrap()),
                 ..Default::default()
             }),
@@ -1984,6 +1878,62 @@ async fn test_download_layout_aware_routing_live() -> Result<(), Box<dyn Error>>
         .await?;
     assert_eq!(result.len, data.len());
     assert_eq!(&buffer[..], &data[..]);
+
+    // Temporary proofing output; a routed chunk is sent to a layout endpoint while
+    // its `Host` header keeps the account authority. TODO: remove before shipping.
+    let observed = observed.lock().unwrap();
+    let layout_calls = observed.iter().filter(|r| r.is_layout).count();
+    let data_chunks = observed.iter().filter(|r| !r.is_layout).count();
+    let routed: Vec<&RoutedRequest> = observed
+        .iter()
+        .filter(|r| !r.is_layout && r.original_host.is_some())
+        .collect();
+
+    eprintln!();
+    eprintln!("=== layout-aware routing ======================================");
+    eprintln!("  account host          : {account_host}");
+    eprintln!("  Get Blob Layout calls : {layout_calls}");
+    eprintln!(
+        "  data chunks           : {data_chunks} ({} routed)",
+        routed.len()
+    );
+    eprintln!("  --------------------------------------------------------------");
+    eprintln!(
+        "  {:<6}  {:<24}  {:<7}  {:<7}  {}",
+        "KIND", "RANGE", "ROUTED", "HINT", "SENT TO"
+    );
+    for r in observed.iter() {
+        let kind = if r.is_layout { "layout" } else { "data" };
+        let what = r.range.as_deref().unwrap_or("(whole blob)");
+        let sent_to = r.sent_to.as_deref().unwrap_or("?");
+        let hint = r.download_hint.as_deref().unwrap_or("-");
+        let routed = if r.original_host.is_some() {
+            "yes"
+        } else {
+            "no"
+        };
+        eprintln!("  {kind:<6}  {what:<24}  {routed:<7}  {hint:<7}  {sent_to}");
+    }
+    eprintln!("===============================================================");
+
+    if routed.is_empty() {
+        eprintln!(
+            "NOTE: no chunk was rewritten — the account returned no layout hint \
+             for this blob, so routing was a no-op (still byte-correct)."
+        );
+    } else {
+        eprintln!(
+            "routing ENGAGED: {} of {data_chunks} data chunk(s) routed to a layout endpoint",
+            routed.len()
+        );
+        for r in &routed {
+            assert_eq!(
+                r.original_host.as_deref(),
+                Some(account_host.as_str()),
+                "a rewritten chunk did not preserve the account Host header"
+            );
+        }
+    }
 
     Ok(())
 }

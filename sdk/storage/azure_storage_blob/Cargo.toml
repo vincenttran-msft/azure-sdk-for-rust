@@ -39,7 +39,6 @@ tokio = { workspace = true, optional = true, features = [
 workspace = true
 
 [dev-dependencies]
-azure_core = { path = "../../core/azure_core", features = ["hmac_rust"] }
 azure_core_test = { path = "../../core/azure_core_test", features = [
   "tracing",
 ] }
