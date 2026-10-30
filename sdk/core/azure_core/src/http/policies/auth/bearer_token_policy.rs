@@ -18,6 +18,9 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 /// Authentication policy for a bearer token.
+///
+/// Requires HTTPS, except for HTTP endpoints on `localhost`, `127.0.0.1`, or
+/// `[::1]` for local emulator testing. Tokens sent over HTTP are not encrypted.
 #[derive(Debug, Clone)]
 pub struct BearerTokenAuthorizationPolicy {
     authorizer: Arc<BearerTokenAuthorizer>,
@@ -67,7 +70,10 @@ impl Policy for BearerTokenAuthorizationPolicy {
         request: &mut Request,
         next: &[Arc<dyn Policy>],
     ) -> PolicyResult {
-        if request.url().scheme() != "https" {
+        let url = request.url();
+        let local_http = url.scheme() == "http"
+            && matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
+        if url.scheme() != "https" && !local_http {
             return Err(Error::with_message(
                 ErrorKind::Other,
                 "authorized requests are not permitted for non-TLS protected endpoints",
@@ -382,7 +388,7 @@ mod tests {
         let policy = BearerTokenAuthorizationPolicy::new(Arc::new(credential), ["scope"]);
         let client = MockHttpClient::new(|_| panic!("transport should not be reached"));
         let transport = Arc::new(TransportPolicy::new(Transport::new(Arc::new(client))));
-        let mut req = Request::new("http://localhost".parse().unwrap(), Method::Get);
+        let mut req = Request::new("http://example.com".parse().unwrap(), Method::Get);
 
         let err = policy
             .send(
@@ -395,6 +401,27 @@ mod tests {
 
         assert_eq!(err.kind(), &ErrorKind::Other);
         assert!(err.to_string().contains("TLS"));
+    }
+
+    #[tokio::test]
+    async fn local_http_reaches_authentication() {
+        for endpoint in [
+            "http://localhost:10000",
+            "http://127.0.0.1:10000",
+            "http://[::1]:10000",
+        ] {
+            let credential = MockCredential::new(&[]);
+            let policy = BearerTokenAuthorizationPolicy::new(Arc::new(credential), ["scope"]);
+            let client = MockHttpClient::new(|_| panic!("expected an error from get_token"));
+            let transport: Arc<dyn Policy> =
+                Arc::new(TransportPolicy::new(Transport::new(Arc::new(client))));
+            let mut request = Request::new(endpoint.parse().unwrap(), Method::Get);
+            let error = policy
+                .send(&Context::default(), &mut request, &[transport])
+                .await
+                .expect_err("mock credential should fail");
+            assert_eq!(error.kind(), &ErrorKind::Credential);
+        }
     }
 
     async fn run_test(tokens: &[AccessToken]) {

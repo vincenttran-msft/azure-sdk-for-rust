@@ -16,6 +16,9 @@ use std::sync::Arc;
 impl PageBlobClient {
     /// Creates a new PageBlobClient from a blob URL.
     ///
+    /// Token authentication requires HTTPS, except for HTTP endpoints on
+    /// `localhost`, `127.0.0.1`, or `[::1]` for local emulator testing.
+    ///
     /// # Arguments
     ///
     /// * `blob_url` - The full URL of the Page blob, for example `https://myaccount.blob.core.windows.net/mycontainer/myblob`.
@@ -41,7 +44,7 @@ impl PageBlobClient {
 
         let mut per_retry_policies: Vec<Arc<dyn Policy>> = Vec::default();
         if let Some(token_credential) = credential {
-            if !blob_url.scheme().starts_with("https") {
+            if blob_url.scheme() != "https" && !super::is_local_http_endpoint(&blob_url) {
                 return Err(azure_core::Error::with_message(
                     azure_core::error::ErrorKind::Other,
                     format!("{blob_url} must use https"),
