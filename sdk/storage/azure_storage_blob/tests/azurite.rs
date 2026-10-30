@@ -5,6 +5,10 @@
 //!
 //! Start the locally patched Azurite with `--oauth basic`; no `az login` is needed.
 //! Run `cargo test -p azure_storage_blob --test azurite --all-features -- --ignored --nocapture`.
+//! For HTTPS, start Azurite with `--oauth basic --cert <certificate> --key <key>`
+//! using a trusted certificate for `127.0.0.1`, then run only
+//! `cargo test -p azure_storage_blob --test azurite --all-features upload_foo_get_properties_https -- --ignored --nocapture --exact`.
+//! The HTTPS test does not require the local HTTP authentication patches.
 //! The test leaves its uniquely named container and blob available for inspection.
 //! Uses a static, unsigned JWT valid from 2020 through the start of 2100,
 //! accepted only by Azurite's basic validation.
@@ -76,12 +80,18 @@ async fn synthetic_token_claims() -> Result<(), Box<dyn Error>> {
 #[tokio::test]
 #[ignore = "requires locally patched Azurite with --oauth basic"]
 async fn upload_foo_get_properties() -> Result<(), Box<dyn Error>> {
+    upload_foo_get_properties_at("http://127.0.0.1:10000/devstoreaccount1").await
+}
+
+#[tokio::test]
+#[ignore = "requires Azurite with --oauth basic and a trusted HTTPS certificate"]
+async fn upload_foo_get_properties_https() -> Result<(), Box<dyn Error>> {
+    upload_foo_get_properties_at("https://127.0.0.1:10000/devstoreaccount1").await
+}
+
+async fn upload_foo_get_properties_at(endpoint: &str) -> Result<(), Box<dyn Error>> {
     let credential = Arc::new(SyntheticCredential);
-    let service = BlobServiceClient::new(
-        Url::parse("http://127.0.0.1:10000/devstoreaccount1")?,
-        Some(credential),
-        None,
-    )?;
+    let service = BlobServiceClient::new(Url::parse(endpoint)?, Some(credential), None)?;
     let container_name = format!(
         "azurite-smoke-{}",
         OffsetDateTime::now_utc().unix_timestamp_nanos()
